@@ -313,13 +313,45 @@ def view_configuration():
         .filter(and_(db.CustomColumns.datatype == 'bool', db.CustomColumns.mark_for_delete == 0)).all()
     restrict_columns = calibre_db.session.query(db.CustomColumns) \
         .filter(and_(db.CustomColumns.datatype == 'text', db.CustomColumns.mark_for_delete == 0)).all()
+
+    shelf_columns = _get_multi_value_shelf_columns()
     languages = calibre_db.speaking_language()
     translations = get_available_locale()
     return render_title_template("config_view_edit.html", conf=config, readColumns=read_column,
                                  restrictColumns=restrict_columns,
+                                 shelfColumns=shelf_columns,
                                  languages=languages,
                                  translations=translations,
                                  title=_("UI Configuration"), page="uiconfig")
+
+
+def _get_multi_value_shelf_columns():
+    """Return dropdown options for shelf generation from multi-value Calibre fields."""
+    options = [
+        {"value": "", "text": _("Off")},
+        {"value": "tags", "text": _("Tags")},
+        {"value": "authors", "text": _("Authors")},
+        {"value": "languages", "text": _("Languages")},
+        {"value": "publishers", "text": _("Publishers")},
+    ]
+
+    try:
+        custom_multi = calibre_db.session.query(db.CustomColumns).filter(
+            and_(
+                db.CustomColumns.mark_for_delete == 0,
+                db.CustomColumns.is_multiple == 1,
+                db.CustomColumns.datatype.in_(['text', 'enumeration']),
+            )
+        ).order_by(db.CustomColumns.name).all()
+        for cc in custom_multi:
+            options.append({
+                "value": f"cc:{cc.id}",
+                "text": f"#{cc.label} — {cc.name}",
+            })
+    except Exception as ex:
+        log.error_or_exception(ex)
+
+    return options
 
 
 @admi.route("/admin/usertable")
@@ -635,6 +667,12 @@ def update_view_configuration():
     _config_int(to_save, "config_authors_max")
     _config_string(to_save, "config_default_language")
     _config_string(to_save, "config_default_locale")
+    _config_string(to_save, "config_generate_shelves_from_calibre_column")
+
+    allowed_values = {opt["value"] for opt in _get_multi_value_shelf_columns()}
+    if config.config_generate_shelves_from_calibre_column not in allowed_values:
+        flash(_("Invalid shelf generation column"), category="error")
+        config.config_generate_shelves_from_calibre_column = ""
 
     config.config_default_role = constants.selected_roles(to_save)
     config.config_default_role &= ~constants.ROLE_ANONYMOUS
@@ -1872,6 +1910,7 @@ def _configuration_update_helper():
         _config_checkbox_int(to_save, "config_public_reg")
         _config_checkbox_int(to_save, "config_register_email")
         reboot_required |= _config_checkbox_int(to_save, "config_kobo_sync")
+        _config_checkbox_int(to_save, "config_kobo_sync_include_generated_shelves")
         _config_int(to_save, "config_external_port")
         _config_checkbox_int(to_save, "config_kobo_proxy")
         _config_checkbox_int(to_save, "config_hardcover_sync")
@@ -1913,7 +1952,7 @@ def _configuration_update_helper():
         if services.goodreads_support:
             services.goodreads_support.connect(config.config_goodreads_api_key,
                                                config.config_use_goodreads)
-            
+
         # Hardcover Author Info configuration
         _config_checkbox(to_save, "config_use_hardcover")
         to_save["config_hardcover_api_token"] = str(to_save.get("config_hardcover_api_token", "")).replace("Bearer ", "")
@@ -2198,7 +2237,7 @@ def _handle_edit_user(to_save, content, languages, translations, kobo_support):
 
 
 def extract_user_data_from_field(user, field):
-    match = re.search(field + r"=(.*?)($|(?<!\\),)", user, re.IGNORECASE | re.UNICODE)    
+    match = re.search(field + r"=(.*?)($|(?<!\\),)", user, re.IGNORECASE | re.UNICODE)
     if match:
         return match.group(1)
     else:

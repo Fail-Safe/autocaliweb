@@ -162,7 +162,7 @@ class TaskGenerateCoverThumbnails(CalibreTask):
 
                     for fmt in formats:
                         self.create_book_cover_single_thumbnail_format(book, thumbnail.resolution, fmt)
-                    
+
                     try:
                         self.cache.delete_cache_file(old_filename, constants.CACHE_TYPE_THUMBNAILS)
                     except FileNotFoundError:
@@ -171,7 +171,7 @@ class TaskGenerateCoverThumbnails(CalibreTask):
                         self.log.error(f"Failed to delete old thumbnail {old_filename}: {e}")
 
                     generated += 1
-                    
+
                     continue
 
                 if source_newer:
@@ -180,10 +180,10 @@ class TaskGenerateCoverThumbnails(CalibreTask):
 
             except Exception as ex:
                 self.log.debug(f'Thumbnail migration/update issue for book {book.id}: {ex}')
-                
+
         return generated
-    
-    
+
+
     def create_book_cover_single_thumbnail_format(self, book, resolution, fmt):
         thumbnail = ub.Thumbnail()
         thumbnail.type = constants.THUMBNAIL_TYPE_COVER
@@ -197,6 +197,14 @@ class TaskGenerateCoverThumbnails(CalibreTask):
         try:
             self.app_db_session.commit()
             self.generate_book_thumbnail(book, thumbnail)
+        except FileNotFoundError as ex:
+            # Missing cover file: treat as non-fatal and avoid repeated retry noise.
+            self.log.debug(f'Skipping {fmt.upper()} book thumbnail for book {getattr(book, "id", "?")}: {ex}')
+            try:
+                self.app_db_session.delete(thumbnail)
+                self.app_db_session.commit()
+            except Exception:
+                self.app_db_session.rollback()
         except Exception as ex:
             self.log.debug(f'Error creating {fmt.upper()} book thumbnail: ' + str(ex))
             self._handleError(f'Error creating {fmt.upper()} book thumbnail: ' + str(ex))
@@ -217,6 +225,14 @@ class TaskGenerateCoverThumbnails(CalibreTask):
             self.app_db_session.commit()
             self.cache.delete_cache_file(thumbnail.filename, constants.CACHE_TYPE_THUMBNAILS)
             self.generate_book_thumbnail(book, thumbnail)
+        except FileNotFoundError as ex:
+            # Missing cover file: drop the thumbnail record so we don't retry endlessly.
+            self.log.debug(f'Skipping update of book thumbnail for book {getattr(book, "id", "?")}: {ex}')
+            try:
+                self.app_db_session.delete(thumbnail)
+                self.app_db_session.commit()
+            except Exception:
+                self.app_db_session.rollback()
         except Exception as ex:
             self.log.debug('Error updating book thumbnail: ' + str(ex))
             self._handleError('Error updating book thumbnail: ' + str(ex))
@@ -258,7 +274,7 @@ class TaskGenerateCoverThumbnails(CalibreTask):
             else:
                 book_cover_filepath = os.path.join(config.get_book_path(), book.path, 'cover.jpg')
                 if not os.path.isfile(book_cover_filepath):
-                    raise Exception('Book cover file not found')
+                    raise FileNotFoundError(book_cover_filepath)
 
                 with Image(filename=book_cover_filepath) as img:
                     height = get_resize_height(thumbnail.resolution)
@@ -586,7 +602,7 @@ class TaskCleanupExpiredThumbnails(CalibreTask):
     def __init__(self, message=N_("Cleanup expired thumbnails")):
         super().__init__(message)
         self.log = logger.create()
-        self.app_db_session = ub.get_new_session_instance()        
+        self.app_db_session = ub.get_new_session_instance()
         self.cache = fs.FileSystem()
 
     def run(self, worker_thread):
@@ -608,14 +624,14 @@ class TaskCleanupExpiredThumbnails(CalibreTask):
                                 .limit(batch_size)
                                 .offset(offset)
                                 .all())
-                    
+
                     if not old_thumbs:
                         break
 
                     for thumbnail in old_thumbs:
                         thumbnail.expiration = datetime.now(timezone.utc) + timedelta(days=1)
                         migrated_count += 1
-                        
+
                     self.app_db_session.commit()
                     self.log.debug(f"Migrated batch: {len(old_thumbs)} old thumbnails")
                     offset += batch_size
@@ -624,7 +640,7 @@ class TaskCleanupExpiredThumbnails(CalibreTask):
 
                 while True:
                     expired = self.app_db_session.query(ub.Thumbnail).filter(
-                        (ub.Thumbnail.expiration.isnot(None)) & 
+                        (ub.Thumbnail.expiration.isnot(None)) &
                         (ub.Thumbnail.expiration <= datetime.now(timezone.utc))
                     ).limit(batch_size).offset(offset).all()
 
@@ -637,12 +653,12 @@ class TaskCleanupExpiredThumbnails(CalibreTask):
                         try:
                             if self.cache.get_cache_file_exists(thumb.filename, constants.CACHE_TYPE_THUMBNAILS):
                                 filepath = self.cache.get_cache_file_path(thumb.filename, constants.CACHE_TYPE_THUMBNAILS)
-                                
+
                                 try:
                                     freed_space += os.path.getsize(filepath)
                                 except OSError:
                                     pass
-                                
+
                                 self.cache.delete_cache_file(thumb.filename, constants.CACHE_TYPE_THUMBNAILS)
 
                                 self.app_db_session.delete(thumb)
@@ -676,10 +692,10 @@ class TaskCleanupExpiredThumbnails(CalibreTask):
     @property
     def name(self):
         return N_("Cleanup Expired Thumbnail")
-        
+
     def __str__(self):
         return "Cleanup expired Thumbnails"
-        
+
     @property
     def is_cancellable(self):
         return False

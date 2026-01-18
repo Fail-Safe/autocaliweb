@@ -34,6 +34,7 @@ from . import calibre_db, config, db, logger, ub
 from .render_template import render_title_template
 from .usermanagement import login_required_if_no_ano, user_login_required
 from .services import hardcover
+from .generated_shelves import GeneratedShelf, generated_shelf_filter
 
 log = logger.create()
 
@@ -75,16 +76,84 @@ def sidebar_counts():
     ).all()
     shelf_ids = [row[0] for row in shelves if row and row[0]]
 
-    if not shelf_ids or not mode:
+    if not mode:
         return jsonify({"success": True, "mode": mode, "counts": {}}), 200
 
     if mode == 1:
-        counts = dict(
-            ub.session.query(ub.BookShelf.shelf, ub.func.count(ub.BookShelf.id))
-            .filter(ub.BookShelf.shelf.in_(shelf_ids))
-            .group_by(ub.BookShelf.shelf)
-            .all()
-        )
+        counts = {}
+        if shelf_ids:
+            counts.update(dict(
+                ub.session.query(ub.BookShelf.shelf, ub.func.count(ub.BookShelf.id))
+                .filter(ub.BookShelf.shelf.in_(shelf_ids))
+                .group_by(ub.BookShelf.shelf)
+                .all()
+            ))
+
+        # Generated shelves (Books on Shelf): group counts from Calibre DB.
+        selector = (getattr(config, "config_generate_shelves_from_calibre_column", "") or "").strip()
+        try:
+            from sqlalchemy.sql.expression import func as sa_func
+            if selector == "tags":
+                rows = (
+                    calibre_db.session.query(db.Tags.name, sa_func.count(db.Books.id.distinct()))
+                    .select_from(db.Tags)
+                    .join(db.Tags.books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Tags.name)
+                    .all()
+                )
+                counts.update({f"generated:tags:{name}": int(c or 0) for name, c in rows if name})
+            elif selector == "authors":
+                rows = (
+                    calibre_db.session.query(db.Authors.name, sa_func.count(db.Books.id.distinct()))
+                    .select_from(db.Authors)
+                    .join(db.Authors.books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Authors.name)
+                    .all()
+                )
+                counts.update({f"generated:authors:{name}": int(c or 0) for name, c in rows if name})
+            elif selector == "publishers":
+                rows = (
+                    calibre_db.session.query(db.Publishers.name, sa_func.count(db.Books.id.distinct()))
+                    .select_from(db.Publishers)
+                    .join(db.Publishers.books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Publishers.name)
+                    .all()
+                )
+                counts.update({f"generated:publishers:{name}": int(c or 0) for name, c in rows if name})
+            elif selector == "languages":
+                rows = (
+                    calibre_db.session.query(db.Languages.lang_code, sa_func.count(db.Books.id.distinct()))
+                    .select_from(db.Languages)
+                    .join(db.Languages.books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Languages.lang_code)
+                    .all()
+                )
+                counts.update({f"generated:languages:{code}": int(c or 0) for code, c in rows if code})
+            elif selector.startswith("cc:"):
+                try:
+                    cc_id = int(selector.split(":", 1)[1])
+                except (TypeError, ValueError):
+                    cc_id = None
+                if cc_id:
+                    cc_class = db.cc_classes.get(cc_id)
+                    rel = getattr(db.Books, f"custom_column_{cc_id}", None)
+                    if cc_class is not None and rel is not None:
+                        rows = (
+                            calibre_db.session.query(cc_class.value, sa_func.count(db.Books.id.distinct()))
+                            .select_from(db.Books)
+                            .join(rel)
+                            .filter(calibre_db.common_filters())
+                            .group_by(cc_class.value)
+                            .all()
+                        )
+                        counts.update({f"generated:cc:{cc_id}:{val}": int(c or 0) for val, c in rows if val})
+        except Exception:
+            log.exception("Failed to compute generated shelf sidebar counts (selector=%r)", selector)
+        counts = {str(k): int(v or 0) for k, v in counts.items()}
         return jsonify({"success": True, "mode": mode, "counts": counts}), 200
 
     if mode == 2:
@@ -106,6 +175,7 @@ def sidebar_counts():
                 .group_by(ub.BookShelf.shelf)
                 .all()
             )
+            counts = {str(k): int(v or 0) for k, v in counts.items()}
             return jsonify({"success": True, "mode": mode, "counts": counts}), 200
 
         try:
@@ -142,6 +212,7 @@ def sidebar_counts():
             shelf_id: sum(1 for book_id in books if book_id in unread_ids)
             for shelf_id, books in shelf_to_books.items()
         }
+        counts = {str(k): int(v or 0) for k, v in counts.items()}
         return jsonify({"success": True, "mode": mode, "counts": counts}), 200
 
     return jsonify({"success": True, "mode": mode, "counts": {}}), 200
@@ -501,6 +572,19 @@ def show_shelf(shelf_id, sort_param, page):
     return render_show_shelf(1, shelf_id, page, sort_param)
 
 
+@shelf.route("/shelf/generated/<source>/<path:value>", defaults={"sort_param": "stored", 'page': 1})
+@shelf.route(
+    "/shelf/generated/<source>/<path:value>/<any(stored,abc,zyx,new,old,authaz,authza,pubnew,pubold):sort_param>",
+    defaults={'page': 1},
+)
+@shelf.route(
+    "/shelf/generated/<source>/<path:value>/<any(stored,abc,zyx,new,old,authaz,authza,pubnew,pubold):sort_param>/<int:page>"
+)
+@login_required_if_no_ano
+def show_generated_shelf(source, value, sort_param, page):
+    return render_show_generated_shelf(source, value, page, sort_param)
+
+
 @shelf.route("/shelf/order/<int:shelf_id>", methods=["GET", "POST"])
 @user_login_required
 def order_shelf(shelf_id):
@@ -729,3 +813,54 @@ def render_show_shelf(shelf_type, shelf_id, page_no, sort_param):
     else:
         flash(_("Error opening shelf. Shelf does not exist or is not accessible"), category="error")
         return redirect(url_for("web.index"))
+
+
+def render_show_generated_shelf(source, value, page_no, sort_param):
+    shelf_filter = generated_shelf_filter(source, value)
+    if shelf_filter is None:
+        flash(_("Error opening shelf. Shelf does not exist or is not accessible"), category="error")
+        return redirect(url_for("web.index"))
+
+    status = 'off'
+    if sort_param == 'stored':
+        sort_param = current_user.get_view_property("genshelf", 'stored') or 'abc'
+    else:
+        current_user.set_view_property("genshelf", 'stored', sort_param)
+
+    order_map = {
+        'abc': [db.Books.sort],
+        'zyx': [db.Books.sort.desc()],
+        'new': [db.Books.timestamp.desc()],
+        'old': [db.Books.timestamp],
+        'authaz': [db.Books.author_sort.asc(), db.Series.name, db.Books.series_index],
+        'authza': [db.Books.author_sort.desc(), db.Series.name.desc(), db.Books.series_index.desc()],
+        'pubnew': [db.Books.pubdate.desc()],
+        'pubold': [db.Books.pubdate],
+    }
+    if sort_param not in order_map:
+        sort_param = 'abc'
+
+    gen_shelf = GeneratedShelf(source=source, value=value, name=value)
+    result, __, pagination = calibre_db.fill_indexpage(
+        page_no,
+        0,
+        db.Books,
+        shelf_filter,
+        order_map[sort_param],
+        True,
+        config.config_read_column,
+        db.books_series_link,
+        db.Books.id == db.books_series_link.c.book,
+        db.Series,
+    )
+
+    return render_title_template(
+        "shelf.html",
+        entries=result,
+        pagination=pagination,
+        title=_("Shelf: '%(name)s'", name=gen_shelf.name),
+        shelf=gen_shelf,
+        page="shelf",
+        status=status,
+        order=sort_param,
+    )

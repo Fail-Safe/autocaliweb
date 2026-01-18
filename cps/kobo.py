@@ -53,6 +53,7 @@ from .helper import get_download_link
 from .services import SyncToken as SyncToken, hardcover
 from .web import download_required
 from .kobo_auth import requires_kobo_auth, get_auth_token
+from .generated_shelves import list_generated_shelves, generated_shelf_filter
 
 KOBO_FORMATS = {"KEPUB": ["KEPUB"], "EPUB": ["EPUB3", "EPUB"]}
 KOBO_STOREAPI_URL = "https://storeapi.kobo.com"
@@ -234,7 +235,7 @@ def HandleSyncRequest():
                            .filter(ub.Shelf.user_id == current_user.id)
                            .filter(*extra_filters)
                            .distinct())
-        
+
         shelf_exists = (
             calibre_db.session.query(ub.BookShelf)
             .join(ub.Shelf)
@@ -825,8 +826,79 @@ def sync_shelves(sync_token, sync_results, only_kobo_shelves=False):
             sync_results.append({
                 "ChangedTag": tag
             })
+
+    # Generated shelves don't exist in the ub.Shelf table, so we sync them separately.
+    # We only include them when syncing *all* shelves; if the user syncs only selected
+    # shelves, generated shelves are excluded (no selection UI yet).
+    if (not only_kobo_shelves) and getattr(config, "config_kobo_sync_include_generated_shelves", False):
+        new_tags_last_modified = sync_generated_shelves(sync_token, sync_results, new_tags_last_modified)
     sync_token.tags_last_modified = new_tags_last_modified
     ub.session_commit()
+
+
+def _to_naive_datetime(value):
+    if not value:
+        return value
+    try:
+        if getattr(value, "tzinfo", None) is not None:
+            return value.replace(tzinfo=None)
+    except Exception:
+        return value
+    return value
+
+
+def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified):
+    if not getattr(config, "config_kobo_sync_include_generated_shelves", False):
+        return new_tags_last_modified
+    selector = getattr(config, "config_generate_shelves_from_calibre_column", "")
+    if not selector:
+        return new_tags_last_modified
+
+    new_tags_last_modified = _to_naive_datetime(new_tags_last_modified)
+    created_timestamp = datetime(1970, 1, 1)
+
+    try:
+        shelves = list_generated_shelves()
+    except Exception:
+        return new_tags_last_modified
+
+    for gen_shelf in shelves:
+        shelf_filter = generated_shelf_filter(gen_shelf.source, gen_shelf.value)
+        if shelf_filter is None:
+            continue
+
+        max_modified = (
+            calibre_db.session.query(func.max(db.Books.last_modified))
+            .filter(calibre_db.common_filters())
+            .filter(shelf_filter)
+            .scalar()
+        )
+        max_modified = _to_naive_datetime(max_modified)
+        if not max_modified:
+            continue
+        if max_modified <= sync_token.tags_last_modified:
+            continue
+
+        book_uuid_rows = (
+            calibre_db.session.query(db.Books.uuid)
+            .filter(calibre_db.common_filters())
+            .filter(shelf_filter)
+            .filter(db.Books.uuid != None)
+            .all()
+        )
+        book_uuids = [row[0] for row in book_uuid_rows if row and row[0]]
+
+        tag = create_kobo_tag_generated(gen_shelf, book_uuids, max_modified, created_timestamp)
+        if not tag:
+            continue
+
+        new_tags_last_modified = max(max_modified, new_tags_last_modified)
+        if created_timestamp > sync_token.tags_last_modified:
+            sync_results.append({"NewTag": tag})
+        else:
+            sync_results.append({"ChangedTag": tag})
+
+    return new_tags_last_modified
 
 
 # Creates a Kobo "Tag" object from an ub.Shelf object
@@ -850,6 +922,22 @@ def create_kobo_tag(shelf):
                 "Type": "ProductRevisionTagItem"
             }
         )
+    return {"Tag": tag}
+
+
+def create_kobo_tag_generated(gen_shelf, book_uuids, last_modified, created):
+    tag = {
+        "Created": convert_to_kobo_timestamp_string(created),
+        "Id": getattr(gen_shelf, "uuid", None),
+        "Items": [],
+        "LastModified": convert_to_kobo_timestamp_string(last_modified),
+        "Name": getattr(gen_shelf, "name", ""),
+        "Type": "UserTag",
+    }
+    if not tag["Id"] or not tag["Name"]:
+        return None
+    for book_uuid in book_uuids or []:
+        tag["Items"].append({"RevisionId": book_uuid, "Type": "ProductRevisionTagItem"})
     return {"Tag": tag}
 
 
@@ -930,7 +1018,7 @@ def push_reading_state_to_hardcover(book: db.Books, request_bookmark: dict):
     """
     if not config.config_hardcover_sync or not bool(hardcover):
         return
-    
+
     blacklist = ub.session.query(ub.HardcoverBookBlacklist).filter(
         ub.HardcoverBookBlacklist.book_id == book.id
     ).first()
@@ -938,7 +1026,7 @@ def push_reading_state_to_hardcover(book: db.Books, request_bookmark: dict):
     if blacklist and blacklist.blacklist_reading_progress:
         log.debug(f"Skipping reading progress sync for book {book.id} - blacklisted for reading progress")
         return
-    
+
     try:
         hardcoverClient = hardcover.HardcoverClient(current_user.hardcover_token)
     except hardcover.MissingHardcoverToken:
@@ -947,7 +1035,7 @@ def push_reading_state_to_hardcover(book: db.Books, request_bookmark: dict):
     except Exception as e:
         log.error(f"Failed to create Hardcover client for user {current_user.name}: {e}")
         return
-    
+
     try:
         hardcoverClient.update_reading_progress(book.identifiers, request_bookmark["ProgressPercent"])
     except Exception as e:

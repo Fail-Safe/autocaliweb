@@ -99,6 +99,7 @@ class _Settings(_Base):
     config_public_reg = Column(SmallInteger, default=0)
     config_remote_login = Column(Boolean, default=False)
     config_kobo_sync = Column(Boolean, default=False)
+    config_kobo_sync_include_generated_shelves = Column(Boolean, default=False)
 
     config_use_hardcover = Column(Boolean, default=False)
     config_hardcover_api_token = Column(String)
@@ -116,6 +117,10 @@ class _Settings(_Base):
     config_restricted_column = Column(SmallInteger, default=0)
     config_denied_column_value = Column(String, default="")
     config_allowed_column_value = Column(String, default="")
+
+    # UI configuration: generate shelves dynamically from a multi-value Calibre column
+    # Values are either built-in identifiers (e.g. 'tags') or custom column selectors (e.g. 'cc:12')
+    config_generate_shelves_from_calibre_column = Column(String, default="")
 
     config_use_google_drive = Column(Boolean, default=False)
     config_google_drive_folder = Column(String)

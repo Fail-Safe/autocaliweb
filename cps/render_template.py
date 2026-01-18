@@ -20,10 +20,12 @@ from flask import render_template, g, abort, request, flash
 from flask_babel import gettext as _
 from werkzeug.local import LocalProxy
 from .cw_login import current_user
-from sqlalchemy.sql.expression import or_, and_
+from sqlalchemy.sql.expression import or_, and_, func
+from typing import cast
 
 from . import config, constants, logger, ub, calibre_db, db
 from .ub import User
+from .generated_shelves import list_generated_shelves
 
 # CWA specific imports
 import requests
@@ -113,37 +115,49 @@ def get_sidebar_config(kwargs=None):
              "show_text": _('Show Books List'), "config_show": content})
     if current_user.role_admin():
         sidebar.append(
-            {"glyph": "glyphicon-copy", "text": _('Duplicates'), "link": 'duplicates.show_duplicates', "id": "duplicates", 
-             "visibility": constants.SIDEBAR_DUPLICATES, 'public': (not current_user.is_anonymous), "page": "duplicates", 
+            {"glyph": "glyphicon-copy", "text": _('Duplicates'), "link": 'duplicates.show_duplicates', "id": "duplicates",
+             "visibility": constants.SIDEBAR_DUPLICATES, 'public': (not current_user.is_anonymous), "page": "duplicates",
              "show_text": _('Show Duplicate Books'), "config_show": content})
-    g.shelves_access = ub.session.query(ub.Shelf).filter(
+    manual_shelves = ub.session.query(ub.Shelf).filter(
         or_(ub.Shelf.is_public == 1, ub.Shelf.user_id == current_user.id)).order_by(ub.Shelf.name).all()
+    generated_shelves = list_generated_shelves()
+    g.shelves_access = sorted(
+        list(manual_shelves) + list(generated_shelves),
+        key=lambda s: (getattr(s, 'name', '') or '').lower(),
+    )
 
     # Sidebar: optional per-shelf count indicator (0=off, 1=books, 2=unread).
     g.shelf_count_indicator_mode = config.config_shelf_count_indicator
-    g.shelf_book_counts = {}
-    shelf_ids = [s.id for s in g.shelves_access if s.id]
+    shelf_book_counts: dict[object, int] = {}
+    # Only manual shelves have per-shelf counts and are eligible for BookShelf operations.
+    shelf_ids = [s.id for s in manual_shelves if getattr(s, 'id', None)]
     if shelf_ids and g.shelf_count_indicator_mode:
         if g.shelf_count_indicator_mode == 1:
-            g.shelf_book_counts = dict(
-                ub.session.query(ub.BookShelf.shelf, ub.func.count(ub.BookShelf.id))
-                .filter(ub.BookShelf.shelf.in_(shelf_ids))
-                .group_by(ub.BookShelf.shelf)
-                .all()
+            shelf_book_counts = cast(
+                dict[object, int],
+                dict(
+                    ub.session.query(ub.BookShelf.shelf, ub.func.count(ub.BookShelf.id))
+                    .filter(ub.BookShelf.shelf.in_(shelf_ids))
+                    .group_by(ub.BookShelf.shelf)
+                    .all()
+                ),
             )
         elif g.shelf_count_indicator_mode == 2 and not current_user.is_anonymous:
             if not config.config_read_column:
-                g.shelf_book_counts = dict(
-                    ub.session.query(ub.BookShelf.shelf, ub.func.count(ub.BookShelf.id))
-                    .outerjoin(
-                        ub.ReadBook,
-                        and_(ub.ReadBook.user_id == int(current_user.id),
-                             ub.ReadBook.book_id == ub.BookShelf.book_id)
-                    )
-                    .filter(ub.BookShelf.shelf.in_(shelf_ids))
-                    .filter(ub.func.coalesce(ub.ReadBook.read_status, 0) != ub.ReadBook.STATUS_FINISHED)
-                    .group_by(ub.BookShelf.shelf)
-                    .all()
+                shelf_book_counts = cast(
+                    dict[object, int],
+                    dict(
+                        ub.session.query(ub.BookShelf.shelf, ub.func.count(ub.BookShelf.id))
+                        .outerjoin(
+                            ub.ReadBook,
+                            and_(ub.ReadBook.user_id == int(current_user.id),
+                                 ub.ReadBook.book_id == ub.BookShelf.book_id)
+                        )
+                        .filter(ub.BookShelf.shelf.in_(shelf_ids))
+                        .filter(ub.func.coalesce(ub.ReadBook.read_status, 0) != ub.ReadBook.STATUS_FINISHED)
+                        .group_by(ub.BookShelf.shelf)
+                        .all()
+                    ),
                 )
             else:
                 try:
@@ -169,10 +183,114 @@ def get_sidebar_config(kwargs=None):
                             .all()
                         }
                         unread_ids = all_book_ids - read_true_ids
-                        g.shelf_book_counts = {
+                        shelf_book_counts = {
                             shelf_id: sum(1 for book_id in books if book_id in unread_ids)
                             for shelf_id, books in shelf_to_books.items()
                         }
+
+    # Generated shelf counts (Books on Shelf) are computed from the Calibre DB.
+    # We only do this for mode==1 to avoid expensive per-shelf unread computations.
+    if generated_shelves and g.shelf_count_indicator_mode == 1:
+        selector = (getattr(config, "config_generate_shelves_from_calibre_column", "") or "").strip()
+        try:
+            if selector == "tags":
+                rows = (
+                    calibre_db.session.query(
+                        db.Tags.name,
+                        func.count(db.Books.id.distinct()),
+                    )
+                    .join(db.books_tags_link)
+                    .join(db.Books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Tags.name)
+                    .order_by(db.Tags.name)
+                    .limit(len(generated_shelves))
+                    .all()
+                )
+                shelf_book_counts.update(
+                    {f"generated:tags:{name}": int(count or 0) for name, count in rows if name}
+                )
+            elif selector == "authors":
+                rows = (
+                    calibre_db.session.query(
+                        db.Authors.name,
+                        func.count(db.Books.id.distinct()),
+                    )
+                    .join(db.books_authors_link)
+                    .join(db.Books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Authors.name)
+                    .order_by(db.Authors.name)
+                    .limit(len(generated_shelves))
+                    .all()
+                )
+                shelf_book_counts.update(
+                    {f"generated:authors:{name}": int(count or 0) for name, count in rows if name}
+                )
+            elif selector == "publishers":
+                rows = (
+                    calibre_db.session.query(
+                        db.Publishers.name,
+                        func.count(db.Books.id.distinct()),
+                    )
+                    .join(db.books_publishers_link)
+                    .join(db.Books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Publishers.name)
+                    .order_by(db.Publishers.name)
+                    .limit(len(generated_shelves))
+                    .all()
+                )
+                shelf_book_counts.update(
+                    {f"generated:publishers:{name}": int(count or 0) for name, count in rows if name}
+                )
+            elif selector == "languages":
+                rows = (
+                    calibre_db.session.query(
+                        db.Languages.lang_code,
+                        func.count(db.Books.id.distinct()),
+                    )
+                    .join(db.books_languages_link)
+                    .join(db.Books)
+                    .filter(calibre_db.common_filters())
+                    .group_by(db.Languages.lang_code)
+                    .order_by(db.Languages.lang_code)
+                    .limit(len(generated_shelves))
+                    .all()
+                )
+                shelf_book_counts.update(
+                    {f"generated:languages:{code}": int(count or 0) for code, count in rows if code}
+                )
+            elif selector.startswith("cc:"):
+                try:
+                    cc_id = int(selector.split(":", 1)[1])
+                except (TypeError, ValueError):
+                    cc_id = None
+                if cc_id:
+                    cc_class = db.cc_classes.get(cc_id)
+                    rel = getattr(db.Books, f"custom_column_{cc_id}", None)
+                    if cc_class is not None and rel is not None:
+                        rows = (
+                            calibre_db.session.query(
+                                cc_class.value,
+                                func.count(db.Books.id.distinct()),
+                            )
+                            .select_from(db.Books)
+                            .join(rel)
+                            .filter(calibre_db.common_filters())
+                            .group_by(cc_class.value)
+                            .order_by(cc_class.value)
+                            .limit(len(generated_shelves))
+                            .all()
+                        )
+                        shelf_book_counts.update(
+                            {f"generated:cc:{cc_id}:{val}": int(count or 0) for val, count in rows if val}
+                        )
+        except Exception:
+            # If anything goes wrong, keep generated shelf counts empty.
+            pass
+
+    g.shelf_book_counts = shelf_book_counts
     return sidebar, simple
 
 # Checks if an update for CWA is available, returning True if yes
@@ -206,7 +324,7 @@ def acw_update_notification() -> None:
     if db.acw_settings['acw_update_notifications']:
         current_date = datetime.now().strftime("%Y-%m-%d")
         acw_last_notification = get_acw_last_notification()
-        
+
         if acw_last_notification == current_date:
             return
 
