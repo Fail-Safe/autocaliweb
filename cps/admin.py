@@ -2096,6 +2096,7 @@ def _configuration_update_helper():
         _config_checkbox_int(to_save, "config_public_reg")
         _config_checkbox_int(to_save, "config_register_email")
         reboot_required |= _config_checkbox_int(to_save, "config_kobo_sync")
+        _config_checkbox_int(to_save, "config_kobo_sync_include_generated_shelves")
         _config_int(to_save, "config_external_port")
         _config_checkbox_int(to_save, "config_kobo_proxy")
         _config_checkbox_int(to_save, "config_hardcover_sync")
