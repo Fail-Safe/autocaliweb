@@ -1845,12 +1845,17 @@ def show_book(book_id):
             if media_format.format.lower() in constants.EXTENSIONS_AUDIO:
                 entry.audio_entries.append(media_format.format.lower())
 
+        from .generated_shelves import generated_shelves_for_book
+
+        generated_shelves = generated_shelves_for_book(book_id)
+
         return render_title_template('detail.html',
                                      entry=entry,
                                      cc=cc,
                                      is_xhr=request.headers.get('X-Requested-With') == 'XMLHttpRequest',
                                      title=entry.title,
                                      books_shelfs=book_in_shelves,
+                                     generated_shelves=generated_shelves,
                                      page="book")
     else:
         log.debug("Selected book is unavailable. File does not exist or is not accessible")

@@ -99,7 +99,16 @@ class _Settings(_Base):
     config_public_reg = Column(SmallInteger, default=0)
     config_remote_login = Column(Boolean, default=False)
     config_kobo_sync = Column(Boolean, default=False)
-    config_kobo_sync_include_generated_shelves = Column(Boolean, default=False)
+    # Kobo sync: how Autocaliweb Shelves map to Kobo Collections.
+    # Values: 'all' | 'selected' | 'hybrid'
+    config_kobo_sync_collections_mode = Column(String, default="selected")
+
+    # When collections mode is 'selected', optionally also sync generated shelves as Kobo collections
+    # but only for books that are in shelves marked for Kobo sync.
+    config_kobo_sync_include_generated_shelves_in_selected = Column(Boolean, default=False)
+    # When True (and include_generated_shelves_in_selected is True), sync ALL generated shelves
+    # for ALL eligible books in the library, not just books in Kobo-synced shelves.
+    config_kobo_sync_all_generated_shelves = Column(Boolean, default=False)
 
     config_use_hardcover = Column(Boolean, default=False)
     config_hardcover_api_token = Column(String)

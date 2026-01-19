@@ -118,8 +118,40 @@ def get_sidebar_config(kwargs=None):
             {"glyph": "glyphicon-copy", "text": _('Duplicates'), "link": 'duplicates.show_duplicates', "id": "duplicates",
              "visibility": constants.SIDEBAR_DUPLICATES, 'public': (not current_user.is_anonymous), "page": "duplicates",
              "show_text": _('Show Duplicate Books'), "config_show": content})
-    manual_shelves = ub.session.query(ub.Shelf).filter(
-        or_(ub.Shelf.is_public == 1, ub.Shelf.user_id == current_user.id)).order_by(ub.Shelf.name).all()
+
+    # In Kobo hybrid mode we use a local-only opt-in shelf. Ensure it exists so it can be managed from the UI.
+    try:
+        kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "") or "").strip().lower()
+        if (not current_user.is_anonymous) and kobo_collections_mode == "hybrid":
+            shelf_name = "Kobo Sync"
+            shelf = (
+                ub.session.query(ub.Shelf)
+                .filter(ub.Shelf.user_id == current_user.id, ub.Shelf.name == shelf_name)
+                .first()
+            )
+            if not shelf:
+                shelf = ub.Shelf()
+                shelf.name = shelf_name
+                shelf.is_public = 0
+                shelf.user_id = current_user.id
+                shelf.kobo_sync = False
+                ub.session.add(shelf)
+                ub.session_commit()
+    except Exception:
+        pass
+
+    manual_shelves_query = ub.session.query(ub.Shelf).filter(
+        or_(ub.Shelf.is_public == 1, ub.Shelf.user_id == current_user.id))
+    # Hide the local-only Kobo opt-in shelf unless it is used (Hybrid mode).
+    try:
+        kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "") or "").strip().lower()
+        if (not current_user.is_anonymous) and kobo_collections_mode != "hybrid":
+            manual_shelves_query = manual_shelves_query.filter(
+                or_(ub.Shelf.user_id != current_user.id, ub.Shelf.name != "Kobo Sync")
+            )
+    except Exception:
+        pass
+    manual_shelves = manual_shelves_query.order_by(ub.Shelf.name).all()
     generated_shelves = list_generated_shelves()
     g.shelves_access = sorted(
         list(manual_shelves) + list(generated_shelves),

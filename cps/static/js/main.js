@@ -132,18 +132,27 @@ $(document).on("change", 'input[type="checkbox"][data-control]', function () {
 $(document).on("change", "select[data-control]", function () {
     var $this = $(this);
     var name = $this.data("control");
-    var showOrHide = parseInt($this.val(), 10);
-    // var showOrHideLast = $("#" + name + " option:last").val()
+    var selectedValue = $this.val();
+    var isNumeric = /^-?\d+$/.test(String(selectedValue));
+    var selectedNumeric = isNumeric ? parseInt(selectedValue, 10) : null;
+
     for (var i = 0; i < $(this)[0].length; i++) {
-        var element = parseInt($(this)[0][i].value, 10);
-        if (element === showOrHide) {
-            $(
-                "[data-related^=" + name + "][data-related*=-" + element + "]",
-            ).show();
+        var optionValue = $(this)[0][i].value;
+        var optionNumeric = isNumeric ? parseInt(optionValue, 10) : null;
+        var isSelected = isNumeric
+            ? optionNumeric === selectedNumeric
+            : String(optionValue) === String(selectedValue);
+
+        var selector =
+            '[data-related^="' +
+            name +
+            '"][data-related*="-' +
+            optionValue +
+            '"]';
+        if (isSelected) {
+            $(selector).show();
         } else {
-            $(
-                "[data-related^=" + name + "][data-related*=-" + element + "]",
-            ).hide();
+            $(selector).hide();
         }
     }
 });

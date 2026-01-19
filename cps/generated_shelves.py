@@ -6,9 +6,16 @@ from dataclasses import dataclass
 import uuid
 
 from flask_babel import gettext as _
-from sqlalchemy.sql.expression import and_, or_, text
 
 from . import calibre_db, config, db
+
+
+def _normalize_author_display(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return value
+    # In this codebase, '|' is an internal placeholder for commas inside a single author name.
+    return value.replace("|", ",")
 
 
 @dataclass(frozen=True)
@@ -50,62 +57,69 @@ def _parse_selector(selector: str) -> tuple[str | None, int | None]:
     return selector, None
 
 
-def list_generated_shelves(max_items: int = 500) -> list[GeneratedShelf]:
+def list_generated_shelves(max_items: int = 500, book_ids=None) -> list[GeneratedShelf]:
     selector, cc_id = _parse_selector(getattr(config, "config_generate_shelves_from_calibre_column", ""))
     if not selector:
         return []
 
     try:
+        eligible_ids = None
+        if book_ids:
+            try:
+                eligible_ids = list(dict.fromkeys([int(b) for b in book_ids if b is not None]))
+            except Exception:
+                eligible_ids = None
+
         if selector == "tags":
-            rows = (
+            q = (
                 calibre_db.session.query(db.Tags.name)
                 .select_from(db.Tags)
                 .join(db.Tags.books)
                 .filter(calibre_db.common_filters())
-                .distinct()
-                .order_by(db.Tags.name)
-                .limit(max_items)
-                .all()
             )
+            if eligible_ids:
+                q = q.filter(db.Books.id.in_(eligible_ids))
+            rows = q.distinct().order_by(db.Tags.name).limit(max_items).all()
             return [GeneratedShelf(source="tags", value=r[0], name=r[0]) for r in rows if r and r[0]]
 
         if selector == "authors":
-            rows = (
+            q = (
                 calibre_db.session.query(db.Authors.name)
                 .select_from(db.Authors)
                 .join(db.Authors.books)
                 .filter(calibre_db.common_filters())
-                .distinct()
-                .order_by(db.Authors.name)
-                .limit(max_items)
-                .all()
             )
-            return [GeneratedShelf(source="authors", value=r[0], name=r[0]) for r in rows if r and r[0]]
+            if eligible_ids:
+                q = q.filter(db.Books.id.in_(eligible_ids))
+            rows = q.distinct().order_by(db.Authors.name).limit(max_items).all()
+            return [
+                GeneratedShelf(source="authors", value=r[0], name=_normalize_author_display(r[0]))
+                for r in rows
+                if r and r[0]
+            ]
 
         if selector == "publishers":
-            rows = (
+            q = (
                 calibre_db.session.query(db.Publishers.name)
                 .select_from(db.Publishers)
                 .join(db.Publishers.books)
                 .filter(calibre_db.common_filters())
-                .distinct()
-                .order_by(db.Publishers.name)
-                .limit(max_items)
-                .all()
             )
+            if eligible_ids:
+                q = q.filter(db.Books.id.in_(eligible_ids))
+            rows = q.distinct().order_by(db.Publishers.name).limit(max_items).all()
             return [GeneratedShelf(source="publishers", value=r[0], name=r[0]) for r in rows if r and r[0]]
 
         if selector == "languages":
-            rows = (
+            q = (
                 calibre_db.session.query(db.Languages.lang_code)
                 .select_from(db.Languages)
                 .join(db.Languages.books)
                 .filter(calibre_db.common_filters())
-                .distinct()
-                .order_by(db.Languages.lang_code)
-                .limit(max_items)
-                .all()
             )
+            if eligible_ids:
+                q = q.filter(db.Books.id.in_(eligible_ids))
+            rows = q.distinct().order_by(db.Languages.lang_code).limit(max_items).all()
             # Languages are stored as lang codes; display name may be derived in UI elsewhere.
             return [GeneratedShelf(source="languages", value=r[0], name=r[0]) for r in rows if r and r[0]]
 
@@ -117,16 +131,15 @@ def list_generated_shelves(max_items: int = 500) -> list[GeneratedShelf]:
             if rel is None:
                 return []
 
-            rows = (
+            q = (
                 calibre_db.session.query(cc_class.value)
                 .select_from(db.Books)
                 .join(rel)
                 .filter(calibre_db.common_filters())
-                .distinct()
-                .order_by(cc_class.value)
-                .limit(max_items)
-                .all()
             )
+            if eligible_ids:
+                q = q.filter(db.Books.id.in_(eligible_ids))
+            rows = q.distinct().order_by(cc_class.value).limit(max_items).all()
             return [GeneratedShelf(source=f"cc:{cc_id}", value=r[0], name=r[0]) for r in rows if r and r[0]]
 
     except Exception:
@@ -186,3 +199,91 @@ def generated_shelf_badge_text(source: str) -> str:
     if source.startswith("cc:"):
         return _("Auto-generated shelf from Calibre Column")
     return response
+
+
+def generated_shelves_for_book(book_id: int, max_items: int = 200) -> list[GeneratedShelf]:
+    selector, cc_id = _parse_selector(getattr(config, "config_generate_shelves_from_calibre_column", ""))
+    if not selector or not book_id:
+        return []
+
+    try:
+        if selector == "tags":
+            rows = (
+                calibre_db.session.query(db.Tags.name)
+                .select_from(db.Books)
+                .join(db.Books.tags)
+                .filter(db.Books.id == book_id)
+                .distinct()
+                .order_by(db.Tags.name)
+                .limit(max_items)
+                .all()
+            )
+            return [GeneratedShelf(source="tags", value=r[0], name=r[0]) for r in rows if r and r[0]]
+
+        if selector == "authors":
+            rows = (
+                calibre_db.session.query(db.Authors.name)
+                .select_from(db.Books)
+                .join(db.Books.authors)
+                .filter(db.Books.id == book_id)
+                .distinct()
+                .order_by(db.Authors.name)
+                .limit(max_items)
+                .all()
+            )
+            return [
+                GeneratedShelf(source="authors", value=r[0], name=_normalize_author_display(r[0]))
+                for r in rows
+                if r and r[0]
+            ]
+
+        if selector == "publishers":
+            rows = (
+                calibre_db.session.query(db.Publishers.name)
+                .select_from(db.Books)
+                .join(db.Books.publishers)
+                .filter(db.Books.id == book_id)
+                .distinct()
+                .order_by(db.Publishers.name)
+                .limit(max_items)
+                .all()
+            )
+            return [GeneratedShelf(source="publishers", value=r[0], name=r[0]) for r in rows if r and r[0]]
+
+        if selector == "languages":
+            rows = (
+                calibre_db.session.query(db.Languages.lang_code)
+                .select_from(db.Books)
+                .join(db.Books.languages)
+                .filter(db.Books.id == book_id)
+                .distinct()
+                .order_by(db.Languages.lang_code)
+                .limit(max_items)
+                .all()
+            )
+            return [GeneratedShelf(source="languages", value=r[0], name=r[0]) for r in rows if r and r[0]]
+
+        if selector == "cc" and cc_id:
+            cc_class = db.cc_classes.get(cc_id)
+            if cc_class is None:
+                return []
+            rel = getattr(db.Books, f"custom_column_{cc_id}", None)
+            if rel is None:
+                return []
+
+            rows = (
+                calibre_db.session.query(cc_class.value)
+                .select_from(db.Books)
+                .join(rel)
+                .filter(db.Books.id == book_id)
+                .distinct()
+                .order_by(cc_class.value)
+                .limit(max_items)
+                .all()
+            )
+            return [GeneratedShelf(source=f"cc:{cc_id}", value=r[0], name=r[0]) for r in rows if r and r[0]]
+
+    except Exception:
+        return []
+
+    return []

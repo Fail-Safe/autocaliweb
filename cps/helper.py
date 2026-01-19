@@ -761,11 +761,27 @@ def get_book_cover_internal(book, resolution=None):
 
         # Send the book cover thumbnail if it exists in cache
         if resolution:
-            thumbnail = get_book_cover_thumbnail(book, resolution)
-            if thumbnail:
-                cache = fs.FileSystem()
-                if cache.get_cache_file_exists(thumbnail.filename, CACHE_TYPE_THUMBNAILS):
-                    return send_from_directory(cache.get_cache_file_dir(thumbnail.filename, CACHE_TYPE_THUMBNAILS), thumbnail.filename)
+            # Kobo devices expect JPEG covers; serving WebP thumbnails can cause the device
+            # to stall on "Downloading book covers".
+            preferred_formats = ["webp", "jpg"]
+            try:
+                from flask import has_request_context, request
+
+                if has_request_context() and getattr(request, "path", None) and "/kobo/" in request.path:
+                    preferred_formats = ["jpg", "webp"]
+            except Exception:
+                pass
+
+            thumbnail = None
+            for fmt in preferred_formats:
+                thumbnail = get_book_cover_thumbnail_by_format(book, resolution, fmt)
+                if thumbnail:
+                    cache = fs.FileSystem()
+                    if cache.get_cache_file_exists(thumbnail.filename, CACHE_TYPE_THUMBNAILS):
+                        return send_from_directory(
+                            cache.get_cache_file_dir(thumbnail.filename, CACHE_TYPE_THUMBNAILS),
+                            thumbnail.filename,
+                        )
 
             #cache = fs.FileSystem()
             ## Check for both webp and jpg thumbnails, generate missing ones
@@ -846,6 +862,38 @@ def get_book_cover_thumbnail(book, resolution):
                 .filter(ub.Thumbnail.entity_id == book.id)
                 .filter(ub.Thumbnail.resolution == resolution)
                 .filter(or_(ub.Thumbnail.expiration.is_(None), ub.Thumbnail.expiration > datetime.now(timezone.utc)))
+                .order_by(ub.Thumbnail.generated_at.desc(), ub.Thumbnail.id.desc())
+                .first())
+
+
+def get_book_cover_thumbnail_by_format(book, resolution, fmt):
+    """Gets the thumbnail for a specific book, resolution and format (webp/jpg)."""
+    if book and book.has_cover:
+        fmt_l = str(fmt).lower()
+
+        # Fast path: generated thumbnails store lowercase formats (e.g. 'jpg', 'webp').
+        thumb = (ub.session
+                 .query(ub.Thumbnail)
+                 .filter(ub.Thumbnail.type == THUMBNAIL_TYPE_COVER)
+                 .filter(ub.Thumbnail.entity_id == book.id)
+                 .filter(ub.Thumbnail.resolution == resolution)
+                 .filter(ub.Thumbnail.format == fmt_l)
+                 .filter(or_(ub.Thumbnail.expiration.is_(None), ub.Thumbnail.expiration > datetime.now(timezone.utc)))
+                 .order_by(ub.Thumbnail.generated_at.desc(), ub.Thumbnail.id.desc())
+                 .first())
+
+        if thumb:
+            return thumb
+
+        # Fallback: handle legacy mixed-case format values.
+        return (ub.session
+                .query(ub.Thumbnail)
+                .filter(ub.Thumbnail.type == THUMBNAIL_TYPE_COVER)
+                .filter(ub.Thumbnail.entity_id == book.id)
+                .filter(ub.Thumbnail.resolution == resolution)
+                .filter(func.lower(ub.Thumbnail.format) == fmt_l)
+                .filter(or_(ub.Thumbnail.expiration.is_(None), ub.Thumbnail.expiration > datetime.now(timezone.utc)))
+                .order_by(ub.Thumbnail.generated_at.desc(), ub.Thumbnail.id.desc())
                 .first())
 
 
@@ -898,6 +946,7 @@ def get_series_thumbnail(series_id, resolution):
         .filter(ub.Thumbnail.entity_id == series_id)
         .filter(ub.Thumbnail.resolution == resolution)
         .filter(or_(ub.Thumbnail.expiration.is_(None), ub.Thumbnail.expiration > datetime.now(timezone.utc)))
+        .order_by(ub.Thumbnail.generated_at.desc(), ub.Thumbnail.id.desc())
         .first())
 
 

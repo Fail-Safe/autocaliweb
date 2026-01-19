@@ -651,13 +651,27 @@ def create_edit_shelf(shelf, page_title, page, shelf_id=False):
             flash(_("Sorry you are not allowed to create a public shelf"), category="error")
             return redirect(url_for('web.index'))
         is_public = 1 if to_save.get("is_public") == "on" else 0
-        if config.config_kobo_sync:
+
+        shelf_title = to_save.get("title", "")
+        reserved_opt_in_name = "Kobo Sync"
+        is_reserved_opt_in_shelf = False
+        try:
+            is_reserved_opt_in_shelf = (shelf.name == reserved_opt_in_name) or (shelf_title.strip() == reserved_opt_in_name)
+        except Exception:
+            is_reserved_opt_in_shelf = (shelf_title.strip() == reserved_opt_in_name)
+
+        if is_reserved_opt_in_shelf:
+            # This shelf is reserved for hybrid opt-in and must never sync to the device as a collection.
+            shelf_title = reserved_opt_in_name
+            is_public = 0
+            shelf.kobo_sync = False
+        elif config.config_kobo_sync:
             shelf.kobo_sync = True if to_save.get("kobo_sync") else False
             if shelf.kobo_sync:
                 ub.session.query(ub.ShelfArchive).filter(ub.ShelfArchive.user_id == current_user.id).filter(
                     ub.ShelfArchive.uuid == shelf.uuid).delete()
                 ub.session_commit()
-        shelf_title = to_save.get("title", "")
+
         if check_shelf_is_unique(shelf_title, is_public, shelf_id):
             shelf.name = shelf_title
             shelf.is_public = is_public

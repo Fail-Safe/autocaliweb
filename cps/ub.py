@@ -470,6 +470,24 @@ class KoboSyncedBooks(Base):
     user_id = Column(Integer, ForeignKey('user.id'))
     book_id = Column(Integer)
 
+
+class KoboTagSyncState(Base):
+    __tablename__ = 'kobo_tag_sync_state'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('user.id'), unique=True)
+
+    generated_selector = Column(String, default='')
+    include_generated_in_selected = Column(Boolean, default=False)
+    collections_mode = Column(String, default='')
+    sync_all_generated = Column(Boolean, default=False)
+
+    # Set true when the server needs to re-emit all generated collections at least once
+    # (e.g., user enabled generated shelves in selected mode).
+    force_resync_generated = Column(Boolean, default=False)
+
+    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
 # The Kobo ReadingState API keeps track of 4 timestamped entities:
 #   ReadingState, StatusInfo, Statistics, CurrentBookmark
 # Which we map to the following 4 tables:
@@ -663,6 +681,43 @@ def add_missing_tables(engine, _session):
         pass
     if not engine.dialect.has_table(engine.connect(), "kosync_progress"):
         KOSyncProgress.__table__.create(bind=engine)
+
+    if not engine.dialect.has_table(engine.connect(), "kobo_tag_sync_state"):
+        KoboTagSyncState.__table__.create(bind=engine)
+
+    # Add missing columns to kobo_tag_sync_state table
+    try:
+        with engine.connect() as conn:
+            # Check if sync_all_generated column exists
+            result = conn.execute(text("PRAGMA table_info(kobo_tag_sync_state)"))
+            columns = [row[1] for row in result.fetchall()]
+            if "sync_all_generated" not in columns:
+                conn.execute(text("ALTER TABLE kobo_tag_sync_state ADD COLUMN sync_all_generated BOOLEAN DEFAULT 0"))
+                conn.commit()
+    except Exception:
+        # Non-fatal: DB might be read-only
+        pass
+
+    # Backfill missing shelf UUIDs (required for Kobo Collections IDs).
+    try:
+        shelves_missing_uuid = (
+            _session.query(Shelf)
+            .filter(or_(Shelf.uuid.is_(None), Shelf.uuid == ""))
+            .all()
+        )
+        for shelf in shelves_missing_uuid or []:
+            try:
+                shelf.uuid = str(uuid.uuid4())
+            except Exception:
+                continue
+        if shelves_missing_uuid:
+            _session.commit()
+    except Exception:
+        # Non-fatal: DB might be read-only.
+        try:
+            _session.rollback()
+        except Exception:
+            pass
 
 
 # migrate all settings missing in registration table

@@ -1910,7 +1910,14 @@ def _configuration_update_helper():
         _config_checkbox_int(to_save, "config_public_reg")
         _config_checkbox_int(to_save, "config_register_email")
         reboot_required |= _config_checkbox_int(to_save, "config_kobo_sync")
-        _config_checkbox_int(to_save, "config_kobo_sync_include_generated_shelves")
+        # Kobo collections (shelves) sync mode: all | selected | hybrid
+        kobo_mode = (to_save.get("config_kobo_sync_collections_mode") or "selected").strip().lower()
+        if kobo_mode not in ("all", "selected", "hybrid"):
+            kobo_mode = "selected"
+        config.config_kobo_sync_collections_mode = kobo_mode
+        if kobo_mode == "selected":
+            _config_checkbox(to_save, "config_kobo_sync_include_generated_shelves_in_selected")
+            _config_checkbox(to_save, "config_kobo_sync_all_generated_shelves")
         _config_int(to_save, "config_external_port")
         _config_checkbox_int(to_save, "config_kobo_proxy")
         _config_checkbox_int(to_save, "config_hardcover_sync")

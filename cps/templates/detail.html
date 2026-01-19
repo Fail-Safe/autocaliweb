@@ -365,6 +365,17 @@
                                         {% endif %}
                                     {% endfor %}
                                 {% endif %}
+
+                                {% if generated_shelves is defined and generated_shelves %}
+                                    {% for shelf in generated_shelves %}
+                                        <button type="button" class="btn btn-sm btn-default" disabled
+                                                title="{{ generated_shelf_badge_text(shelf.source) }}">
+                                            <span class="glyphicon glyphicon-list shelf shelf-generated-dot"
+                                                  aria-label="{{ generated_shelf_badge_text(shelf.source) }}"></span>
+                                            {{ shelf.name }}
+                                        </button>
+                                    {% endfor %}
+                                {% endif %}
                             </div>
                             <div id="shelf-action-errors" class="pull-left" role="alert"></div>
                         </div>
