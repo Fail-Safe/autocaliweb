@@ -523,7 +523,7 @@ class KoboAnnotationSync(Base):
     highlighted_text = Column(String, nullable=True)
     highlight_color = Column(String, nullable=True)
     note_text = Column(String, nullable=True)
-    
+
     __table_args__ = (
         Index('ix_kobo_annotation_sync_user_annotation', 'user_id', 'annotation_id'),
     )

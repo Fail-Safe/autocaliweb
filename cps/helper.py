@@ -781,13 +781,13 @@ def get_book_cover_internal(book, resolution=None):
             #    try:
             #        from flask import has_request_context, request
             #        is_kobo_request = (has_request_context() and request.path and '/kobo/' in request.path)
-            #        
+            #
             #        if not is_kobo_request and use_IM:
             #            from .tasks.thumbnail import TaskGenerateCoverThumbnails
             #            # Create and run thumbnail generation for this book
             #            thumbnail_task = TaskGenerateCoverThumbnails(book_id=book.id)
             #            thumbnail_task.create_book_cover_thumbnails(book)
-            #            
+            #
             #            # Refresh thumbnail references after generation
             #            webp_thumb = get_book_cover_thumbnail_by_format(book, resolution, 'webp')
             #            jpg_thumb = get_book_cover_thumbnail_by_format(book, resolution, 'jpg')
@@ -800,7 +800,7 @@ def get_book_cover_internal(book, resolution=None):
             #try:
             #    from flask import has_request_context, request
             #    is_kobo_request = (has_request_context() and request.path and '/kobo/' in request.path)
-            #    
+            #
             #    # Prefer jpg for Kobo requests, webp for web requests
             #    if is_kobo_request:
             #        thumbnail_to_serve = jpg_thumb if jpg_exists else (webp_thumb if webp_exists else None)
@@ -847,7 +847,7 @@ def get_book_cover_thumbnail(book, resolution):
                 .filter(ub.Thumbnail.resolution == resolution)
                 .filter(or_(ub.Thumbnail.expiration.is_(None), ub.Thumbnail.expiration > datetime.now(timezone.utc)))
                 .first())
-    
+
 
 #def get_book_cover_thumbnail_by_format(book, resolution, format):
 #    """Gets the thumbnail for a specific book, resolution and format (webp/jpg)."""
@@ -959,9 +959,9 @@ def save_cover_from_filestorage(filepath, saved_filename, img):
 # saves book cover to gdrive or locally
 def save_cover(img, book_path):
     content_type = img.headers.get('content-type')
-    # Clean content-type by removing charset and other parameters  
-    if content_type:  
-        content_type = content_type.split(';')[0].strip()  
+    # Clean content-type by removing charset and other parameters
+    if content_type:
+        content_type = content_type.split(';')[0].strip()
 
     if use_IM:
         if content_type not in ('image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/bmp'):
@@ -1051,7 +1051,7 @@ def do_download_file(book, book_format, client, data, headers):
                     try:
                         if os.path.exists(expected_file):
                             os.remove(expected_file)
-                        
+
                         os.rename(uuid_file, expected_file)
                         download_name = book_name
                         log.info(f"Renamed exported file to match expected name: {book_name}.{book_format}")
@@ -1067,7 +1067,7 @@ def do_download_file(book, book_format, client, data, headers):
 
     log.info('Downloading file: \'%s\' by %s - %s', format(os.path.join(filename, book_name + "." + book_format)),
              current_user.name, request.headers.get('X-Forwarded-For', request.remote_addr))
-    
+
     @after_this_request
     def _cleanup_temp_export(res):
         try:
@@ -1075,13 +1075,13 @@ def do_download_file(book, book_format, client, data, headers):
             if use_x_sendfile:
                 current_app.logger.debug("X-Sendfile is enabled, skipping cleanup of temp export")
                 return res
-            
+
             real_filename_dir = os.path.realpath(filename)
             tmpdir = get_temp_dir()
 
             if not isinstance(real_filename_dir, str):
                 return res
-            
+
             if real_filename_dir.startswith(tmpdir + os.sep) or "calibre_web" in real_filename_dir:
                 try:
                     target = os.path.join(real_filename_dir, download_name + "." + book_format)
