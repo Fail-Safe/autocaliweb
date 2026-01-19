@@ -53,7 +53,6 @@ from .usermanagement import user_login_required
 from .cw_babel import get_available_translations, get_available_locale, get_user_locale_language
 from . import debug_info
 from .string_helper import strip_whitespaces
-from .web import web
 
 log = logger.create()
 
@@ -527,7 +526,7 @@ def edit_list_user(param):
         vals['field_index'] = vals['field_index'][0]
     if 'value' in vals:
         vals['value'] = vals['value'][0]
-    elif not ('value[]' in vals):
+    elif 'value[]' not in vals:
         return _("Malformed request"), 400
     for user in users:
         try:
@@ -1053,7 +1052,7 @@ def restriction_addition(element, list_func):
     elementlist = list_func()
     if elementlist == ['']:
         elementlist = []
-    if not element['add_element'] in elementlist:
+    if element['add_element'] not in elementlist:
         elementlist += [element['add_element']]
     return ','.join(elementlist)
 
@@ -1919,6 +1918,7 @@ def _configuration_update_helper():
             _config_checkbox(to_save, "config_kobo_sync_include_generated_shelves_in_selected")
             _config_checkbox(to_save, "config_kobo_sync_all_generated_shelves")
         _config_int(to_save, "config_external_port")
+        _config_int(to_save, "config_kobo_sync_item_limit")
         _config_checkbox_int(to_save, "config_kobo_proxy")
         _config_checkbox_int(to_save, "config_hardcover_sync")
         _config_checkbox_int(to_save, "config_hardcover_annosync")

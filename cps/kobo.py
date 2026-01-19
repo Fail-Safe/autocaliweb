@@ -41,10 +41,9 @@ from flask import (
 )
 from .cw_login import current_user
 from werkzeug.datastructures import Headers
-from sqlalchemy import func, null, literal
+from sqlalchemy import func, literal
 from sqlalchemy.sql.expression import and_, or_
 from sqlalchemy.exc import StatementError
-from sqlalchemy.sql import select
 import requests
 
 from . import config, logger, kobo_auth, db, calibre_db, helper, shelf as shelf_lib, ub, csrf, kobo_sync_status
@@ -61,7 +60,18 @@ KOBO_FORMATS = {"KEPUB": ["KEPUB"], "EPUB": ["EPUB3", "EPUB"]}
 KOBO_STOREAPI_URL = "https://storeapi.kobo.com"
 KOBO_IMAGEHOST_URL = "https://cdn.kobo.com/book-images"
 
-SYNC_ITEM_LIMIT = 100
+
+def get_sync_item_limit():
+    """Return the configured sync item limit clamped to [10, 500].
+
+    This controls how many items (books, reading states, and collections)
+    are included in a single sync response to the device.
+    """
+    try:
+        limit = int(getattr(config, "config_kobo_sync_item_limit", 100) or 100)
+    except Exception:
+        limit = 100
+    return max(10, min(500, limit))
 
 # Reusable session for Kobo store proxy requests (connection pooling)
 _kobo_store_session = None
@@ -191,6 +201,11 @@ def _redact_auth_token_in_path(path: str) -> str:
         return path
 
 def _effective_only_kobo_shelves_sync():
+    """Determine whether book sync should be restricted to kobo_sync-enabled shelves.
+
+    Returns False (sync all books) when mode is "all".
+    Returns True (restrict to kobo_sync shelves) for "selected" or "hybrid" modes.
+    """
     mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
     if mode not in ("all", "selected", "hybrid"):
         mode = "selected"
@@ -573,11 +588,74 @@ def HandleSyncRequest():
                            .order_by(db.Books.id))
 
     reading_states_in_new_entitlements = []
-    books = changed_entries.limit(SYNC_ITEM_LIMIT)
-    log.debug("Books to Sync: {}".format(len(books.all())))
+    sync_item_limit = get_sync_item_limit()
+    books = changed_entries.limit(sync_item_limit)
+    books_list = books.all()
+    log.debug("Books to Sync: {}".format(len(books_list)))
     log.debug("sync_token.books_last_created: %s" % sync_token.books_last_created)
+
+    # Debug: Log total library book count and format info for troubleshooting incomplete syncs
+    try:
+        total_books = calibre_db.session.query(db.Books).filter(calibre_db.common_filters()).count()
+        total_books_unfiltered = calibre_db.session.query(db.Books).count()
+        books_with_kobo_formats = (
+            calibre_db.session.query(db.Books.id)
+            .join(db.Data)
+            .filter(calibre_db.common_filters())
+            .filter(db.Data.format.in_(KOBO_FORMATS))
+            .distinct()
+            .count()
+        )
+        already_synced = (
+            ub.session.query(ub.KoboSyncedBooks.book_id)
+            .filter(ub.KoboSyncedBooks.user_id == current_user.id)
+            .count()
+        )
+        # Count synced books that still exist in library (fetch IDs first to avoid cross-DB subquery)
+        existing_book_ids = set(
+            row[0] for row in calibre_db.session.query(db.Books.id).filter(calibre_db.common_filters()).all()
+        )
+        synced_book_ids = set(
+            row[0] for row in ub.session.query(ub.KoboSyncedBooks.book_id)
+            .filter(ub.KoboSyncedBooks.user_id == current_user.id).all()
+        )
+        synced_and_exists = len(synced_book_ids & existing_book_ids)
+        orphaned_sync_records = len(synced_book_ids - existing_book_ids)
+        archived_count = (
+            ub.session.query(ub.ArchivedBook.book_id)
+            .filter(ub.ArchivedBook.user_id == current_user.id, ub.ArchivedBook.is_archived == True)
+            .count()
+        )
+        log.info(
+            "Kobo sync stats: total_library=%s (unfiltered=%s) books_with_kobo_formats=%s "
+            "already_synced=%s synced_and_exists=%s orphaned_sync_records=%s archived=%s "
+            "to_sync_this_batch=%s limit=%s mode=%s only_kobo_shelves=%s",
+            total_books,
+            total_books_unfiltered,
+            books_with_kobo_formats,
+            already_synced,
+            synced_and_exists,
+            orphaned_sync_records,
+            archived_count,
+            len(books_list),
+            sync_item_limit,
+            kobo_collections_mode,
+            only_kobo_shelves,
+        )
+        # Log detailed sync status for debugging
+        log.debug(
+            "Kobo sync detail: synced_book_ids=%s, existing_book_ids_count=%s, "
+            "synced_and_exists=%s, books_in_batch=%s",
+            sorted(list(synced_book_ids))[:20],  # First 20 to avoid log spam
+            len(existing_book_ids),
+            synced_and_exists,
+            [b.Books.id for b in books_list][:20] if books_list else [],
+        )
+    except Exception as e:
+        log.debug("Kobo sync stats debug failed: %s", e)
+
     entitled_book_ids = set()
-    for book in books:
+    for book in books_list:
         formats = [data.format for data in book.Books.data]
         if 'KEPUB' not in formats and config.config_kepubifypath and 'EPUB' in formats:
             helper.convert_book_format(book.Books.id, config.get_book_path(), 'EPUB', 'KEPUB', current_user.name)
@@ -685,8 +763,8 @@ def HandleSyncRequest():
         and_(ub.KoboReadingState.user_id == current_user.id,
              ub.KoboReadingState.book_id.notin_(reading_states_in_new_entitlements)))\
         .order_by(ub.KoboReadingState.last_modified)
-    cont_sync |= bool(changed_reading_states.count() > SYNC_ITEM_LIMIT)
-    for kobo_reading_state in changed_reading_states.limit(SYNC_ITEM_LIMIT).all():
+    cont_sync |= bool(changed_reading_states.count() > sync_item_limit)
+    for kobo_reading_state in changed_reading_states.limit(sync_item_limit).all():
         book = calibre_db.session.query(db.Books).filter(db.Books.id == kobo_reading_state.book_id).one_or_none()
         if book:
             sync_results.append({
@@ -845,6 +923,7 @@ def get_author(book):
     for author in book.authors:
         raw_name = (getattr(author, "name", "") or "")
         if not raw_name or not raw_name.strip():
+            log.debug("Kobo get_author: skipping empty author for book '%s' (id=%s)", book.title, book.id)
             continue
         # In this codebase, '|' is used as an internal placeholder for commas
         # in names like "Lastname| Firstname" to avoid delimiter ambiguity.
@@ -856,6 +935,13 @@ def get_author(book):
         seen.add(name)
         autor_roles.append({"Name": name})
         author_list.append(name)
+    log.debug(
+        "Kobo get_author: book='%s' (id=%s) raw_authors=%s final_list=%s",
+        book.title,
+        book.id,
+        [getattr(a, "name", None) for a in (book.authors or [])],
+        author_list,
+    )
     return {
         "ContributorRoles": autor_roles or None,
         "Contributors": author_list or None,
@@ -1742,9 +1828,36 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
     now_force_ts = datetime.now(timezone.utc)
     now_force_ts_naive = _to_naive_datetime(now_force_ts)
 
+    # For "selected" mode with sync_all_generated=False, pre-fetch which generated shelves
+    # the user has marked for Kobo sync.
+    user_enabled_generated_shelves = None
+    if kobo_collections_mode == "selected" and not sync_all_generated:
+        try:
+            enabled_rows = (
+                ub.session.query(ub.GeneratedShelfKoboSync.source, ub.GeneratedShelfKoboSync.value)
+                .filter(
+                    ub.GeneratedShelfKoboSync.user_id == current_user.id,
+                    ub.GeneratedShelfKoboSync.kobo_sync == True,
+                )
+                .all()
+            )
+            user_enabled_generated_shelves = {(row.source, row.value) for row in enabled_rows}
+            log.debug(
+                "Kobo generated shelves: user has %s shelves enabled for sync",
+                len(user_enabled_generated_shelves),
+            )
+        except Exception as e:
+            log.debug("Kobo generated shelves: failed to fetch user preferences: %s", e)
+            user_enabled_generated_shelves = set()
+
     emitted = 0
     emitted_items = 0
     for gen_shelf in shelves:
+        # In "selected" mode with sync_all_generated=False, only sync shelves the user has enabled
+        if user_enabled_generated_shelves is not None:
+            if (gen_shelf.source, gen_shelf.value) not in user_enabled_generated_shelves:
+                continue
+
         shelf_filter = generated_shelf_filter(gen_shelf.source, gen_shelf.value)
         if shelf_filter is None:
             continue
@@ -1818,6 +1931,24 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
         )
     except Exception:
         pass
+
+    # If filtering by user preferences, delete collections for generated shelves that are NOT enabled
+    if user_enabled_generated_shelves is not None and len(user_enabled_generated_shelves) < len(shelves):
+        delete_ts = datetime.now(timezone.utc)
+        for gen_shelf in shelves:
+            if (gen_shelf.source, gen_shelf.value) in user_enabled_generated_shelves:
+                continue  # This one is enabled, don't delete
+            tag_id = getattr(gen_shelf, "uuid", None)
+            if tag_id:
+                sync_results.append({
+                    "DeletedTag": {
+                        "Tag": {
+                            "Id": tag_id,
+                            "LastModified": convert_to_kobo_timestamp_string(delete_ts),
+                        }
+                    }
+                })
+        new_tags_last_modified = max(_to_naive_datetime(delete_ts), new_tags_last_modified)
 
     if force_resync:
         try:
@@ -2294,7 +2425,7 @@ def HandleInitRequest():
             if "Resources" in store_response_json:
                 kobo_resources = store_response_json["Resources"]
             else:
-                log.error(f"Kobo: Kobo Store initialization response missing 'Resources' field.")
+                log.error("Kobo: Kobo Store initialization response missing 'Resources' field.")
         except Exception as e:
             log.error(f"Failed to receive or parse response from Kobo's initialization endpoint: {e}")
     if not kobo_resources:

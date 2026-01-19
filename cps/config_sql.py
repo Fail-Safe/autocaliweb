@@ -106,6 +106,8 @@ class _Settings(_Base):
     # When collections mode is 'selected', optionally also sync generated shelves as Kobo collections
     # but only for books that are in shelves marked for Kobo sync.
     config_kobo_sync_include_generated_shelves_in_selected = Column(Boolean, default=False)
+    # Maximum items per sync response (books, reading states, collections). Clamped to [10, 500].
+    config_kobo_sync_item_limit = Column(Integer, default=100)
     # When True (and include_generated_shelves_in_selected is True), sync ALL generated shelves
     # for ALL eligible books in the library, not just books in Kobo-synced shelves.
     config_kobo_sync_all_generated_shelves = Column(Boolean, default=False)

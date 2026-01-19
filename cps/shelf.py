@@ -426,7 +426,7 @@ def search_to_shelf(shelf_id):
         return redirect(url_for('web.index'))
 
     if not check_shelf_edit_permissions(shelf):
-        log.warning("You are not allowed to add a book to the shelf".format(shelf.name))
+        log.warning("You are not allowed to add a book to the shelf")
         flash(_("You are not allowed to add a book to the shelf"), category="error")
         return redirect(url_for('web.index'))
 
@@ -540,6 +540,67 @@ def edit_shelf(shelf_id):
         flash(_("Sorry you are not allowed to edit this shelf"), category="error")
         return redirect(url_for('web.index'))
     return create_edit_shelf(shelf, page_title=_("Edit a shelf"), page="shelfedit", shelf_id=shelf_id)
+
+
+@shelf.route("/shelf/generated/edit/<source>/<path:value>", methods=["GET", "POST"])
+@user_login_required
+def edit_generated_shelf(source, value):
+    """Edit settings for a generated shelf (e.g., enable/disable Kobo sync)."""
+    if not config.config_kobo_sync:
+        flash(_("Kobo sync is not enabled"), category="error")
+        return redirect(url_for('web.index'))
+
+    # Create a GeneratedShelf object for display purposes
+    gen_shelf = GeneratedShelf(source=source, value=value, name=value)
+
+    # Get or create the sync preference record
+    sync_pref = (
+        ub.session.query(ub.GeneratedShelfKoboSync)
+        .filter(
+            ub.GeneratedShelfKoboSync.user_id == current_user.id,
+            ub.GeneratedShelfKoboSync.source == source,
+            ub.GeneratedShelfKoboSync.value == value,
+        )
+        .first()
+    )
+
+    if request.method == "POST":
+        to_save = request.form.to_dict()
+        kobo_sync_enabled = to_save.get("kobo_sync") == "on"
+
+        if sync_pref:
+            sync_pref.kobo_sync = kobo_sync_enabled
+        else:
+            sync_pref = ub.GeneratedShelfKoboSync(
+                user_id=current_user.id,
+                source=source,
+                value=value,
+                kobo_sync=kobo_sync_enabled,
+            )
+            ub.session.add(sync_pref)
+
+        try:
+            ub.session.commit()
+            flash(_("Shelf %(title)s changed", title=gen_shelf.name), category="success")
+            return redirect(url_for('shelf.show_generated_shelf', source=source, value=value))
+        except (OperationalError, InvalidRequestError) as ex:
+            ub.session.rollback()
+            log.error_or_exception("Settings Database error: {}".format(ex))
+            flash(_("Oops! Database Error: %(error)s.", error=ex.orig), category="error")
+
+    # For GET request, render the edit form
+    sync_only_selected_shelves = current_user.kobo_only_shelves_sync
+    kobo_sync_checked = sync_pref.kobo_sync if sync_pref else False
+
+    return render_title_template(
+        'generated_shelf_edit.html',
+        shelf=gen_shelf,
+        kobo_sync_checked=kobo_sync_checked,
+        title=_("Edit a shelf"),
+        page="shelfedit",
+        kobo_sync_enabled=config.config_kobo_sync,
+        sync_only_selected_shelves=sync_only_selected_shelves,
+    )
 
 
 @shelf.route("/shelf/delete/<int:shelf_id>", methods=["POST"])
@@ -823,7 +884,8 @@ def render_show_shelf(shelf_type, shelf_id, page_no, sort_param):
                                      shelf=shelf,
                                      page="shelf",
                                      status=status,
-                                     order=sort_param)
+                                     order=sort_param,
+                                     config=config)
     else:
         flash(_("Error opening shelf. Shelf does not exist or is not accessible"), category="error")
         return redirect(url_for("web.index"))
@@ -877,4 +939,5 @@ def render_show_generated_shelf(source, value, page_no, sort_param):
         page="shelf",
         status=status,
         order=sort_param,
+        config=config,
     )

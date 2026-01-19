@@ -33,7 +33,11 @@
     {% endif %}
   {% endif %}
 
-  {% if shelf.is_generated and entries.__len__() %}
+  {% if shelf.is_generated %}
+    {% if current_user.is_authenticated and config.config_kobo_sync %}
+      <a id="edit_generated_shelf" href="{{ url_for('shelf.edit_generated_shelf', source=shelf.source, value=shelf.value) }}" class="btn btn-primary">{{ _('Edit Shelf Properties') }} </a>
+    {% endif %}
+    {% if entries.__len__() %}
     <div class="filterheader hidden-xs">
       <a data-toggle="tooltip" title="{{_('Sort according to book date, newest first')}}" id="new" class="btn btn-primary {% if order == 'new' %} active{% endif %}" href="{{url_for('shelf.show_generated_shelf', source=shelf.source, value=shelf.value, sort_param='new')}}"><span class="glyphicon glyphicon-book"></span> <span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order"></span></a>
       <a data-toggle="tooltip" title="{{_('Sort according to book date, oldest first')}}" id="old" class="btn btn-primary {% if order == 'old' %} active{% endif %}" href="{{url_for('shelf.show_generated_shelf', source=shelf.source, value=shelf.value, sort_param='old')}}"><span class="glyphicon glyphicon-book"></span> <span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order-alt"></span></a>
@@ -44,6 +48,7 @@
       <a data-toggle="tooltip" title="{{_('Sort according to publishing date, newest first')}}" id="pub_new" class="btn btn-primary {% if order == 'pubnew' %} active{% endif %}" href="{{url_for('shelf.show_generated_shelf', source=shelf.source, value=shelf.value, sort_param='pubnew')}}"><span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order"></span></a>
       <a data-toggle="tooltip" title="{{_('Sort according to publishing date, oldest first')}}" id="pub_old" class="btn btn-primary {% if order == 'pubold' %} active{% endif %}" href="{{url_for('shelf.show_generated_shelf', source=shelf.source, value=shelf.value, sort_param='pubold')}}"><span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order-alt"></span></a>
     </div>
+    {% endif %}
   {% endif %}
   <div class="row display-flex">
     {% for entry in entries %}

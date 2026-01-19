@@ -31,12 +31,12 @@ from .cw_login import AnonymousUserMixin, current_user, user_logged_in
 try:
     from flask_dance.consumer.backend.sqla import OAuthConsumerMixin
     oauth_support = True
-except ImportError as e:
+except ImportError:
     # fails on flask-dance >1.3, due to renaming
     try:
         from flask_dance.consumer.storage.sqla import OAuthConsumerMixin
         oauth_support = True
-    except ImportError as e:
+    except ImportError:
         OAuthConsumerMixin = BaseException
         oauth_support = False
 from sqlalchemy import create_engine, exc, exists, event, text, Column, ForeignKey, Index, String, Integer, SmallInteger, Boolean, DateTime, Float, JSON
@@ -355,7 +355,7 @@ class Anonymous(AnonymousUserMixin, UserBase):
         return None
 
     def set_view_property(self, page, prop, value):
-        if not 'view' in flask_session:
+        if 'view' not in flask_session:
             flask_session['view'] = dict()
         if not flask_session['view'].get(page):
             flask_session['view'][page] = dict()
@@ -548,6 +548,30 @@ class KoboAnnotationSync(Base):
 
     def __repr__(self):
         return f'<KoboAnnotationSync annotation_id={self.annotation_id} book_id={self.book_id}>'
+
+
+class GeneratedShelfKoboSync(Base):
+    """Track Kobo sync preferences for generated shelves (author, series, tags, etc.).
+
+    Generated shelves are computed dynamically from Calibre metadata and don't exist in the
+    ub.Shelf table. This table stores the user's kobo_sync preference for each generated shelf.
+    """
+    __tablename__ = 'generated_shelf_kobo_sync'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('user.id'), nullable=False)
+    source = Column(String, nullable=False)  # e.g., "authors", "series", "tags", "publishers", "languages"
+    value = Column(String, nullable=False)   # e.g., "Brandon Sanderson", "The Expanse"
+    kobo_sync = Column(Boolean, default=False)
+    created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index('ix_generated_shelf_kobo_sync_user_source_value', 'user_id', 'source', 'value', unique=True),
+    )
+
+    def __repr__(self):
+        return f'<GeneratedShelfKoboSync user={self.user_id} source={self.source} value={self.value} sync={self.kobo_sync}>'
 
 
 class HardcoverBookBlacklist(Base):
@@ -774,7 +798,7 @@ def migrate_user_table(engine, _session):
             ('auto_send_enabled', "BOOLEAN NOT NULL DEFAULT 0"),
         ]
         for col_name, col_def in needed:
-            exists = conn.execute(text(f"PRAGMA table_info(user)")).fetchall()
+            exists = conn.execute(text("PRAGMA table_info(user)")).fetchall()
             if not any(row[1] == col_name for row in exists):
                 conn.execute(text(f"ALTER TABLE user ADD COLUMN {col_name} {col_def}"))
 
@@ -797,7 +821,7 @@ def migrate_oauth_table(engine, _session):
             ('active', "BOOLEAN NOT NULL DEFAULT 0"),
         ]
         for col_name, col_def in needed:
-            exists = conn.execute(text(f"PRAGMA table_info(oauthProvider)")).fetchall()
+            exists = conn.execute(text("PRAGMA table_info(oauthProvider)")).fetchall()
             if not any(row[1] == col_name for row in exists):
                 conn.execute(text(f"ALTER TABLE oauthProvider ADD COLUMN {col_name} {col_def}"))
 
