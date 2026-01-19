@@ -56,13 +56,17 @@ def add_synced_books(book_id, reason=None):
 def remove_synced_book(book_id, all=False, session=None, reason=None, user_id=None):
     if all:
         user_filter = true()
+        log_user_id = "<all>"
     else:
         effective_user_id = user_id
         if effective_user_id is None:
             effective_user_id = getattr(current_user, "id", None)
         if effective_user_id is None:
-            raise RuntimeError("remove_synced_book requires user_id when not running in a request context")
+            raise RuntimeError(
+                "remove_synced_book requires user_id when not running in a request context"
+            )
         user_filter = ub.KoboSyncedBooks.user_id == effective_user_id
+        log_user_id = effective_user_id
     if not session:
         ub.session.query(ub.KoboSyncedBooks).filter(ub.KoboSyncedBooks.book_id == book_id).filter(user_filter).delete()
         ub.session_commit()
@@ -73,7 +77,7 @@ def remove_synced_book(book_id, all=False, session=None, reason=None, user_id=No
     try:
         log.debug(
             "KoboSync unmark-synced user=%s book=%s all=%s reason=%s",
-            "<all>" if all else user_id if user_id is not None else getattr(current_user, "id", None),
+            log_user_id,
             book_id,
             bool(all),
             reason or "<unspecified>",

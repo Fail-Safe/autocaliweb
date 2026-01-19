@@ -358,9 +358,7 @@ def get_sidebar_config(kwargs=None):
             shelf_name = "Kobo Sync"
             shelf = (
                 ub.session.query(ub.Shelf)
-                .filter(
-                    ub.Shelf.user_id == current_user.id, ub.Shelf.name == shelf_name
-                )
+                .filter(ub.Shelf.user_id == current_user.id, ub.Shelf.name == shelf_name)
                 .first()
             )
             if not shelf:
@@ -384,8 +382,6 @@ def get_sidebar_config(kwargs=None):
             manual_shelves_query = manual_shelves_query.filter(
                 or_(ub.Shelf.user_id != current_user.id, ub.Shelf.name != "Kobo Sync")
             )
-    except Exception:
-        pass
     except Exception:
         pass
     manual_shelves = manual_shelves_query.order_by(ub.Shelf.name).all()
