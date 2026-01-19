@@ -24,15 +24,12 @@ __package__ = "cps"
 import sys
 import os
 import mimetypes
+import hashlib
 
 from flask import Flask
-from .MyLoginManager import MyLoginManager
-from flask_principal import Principal
-from werkzeug.middleware.proxy_fix import ProxyFix
 from flask.sessions import SecureCookieSessionInterface
 from itsdangerous import URLSafeTimedSerializer, Signer
-import hashlib
-import itsdangerous 
+import itsdangerous
 
 from . import logger
 from .cli import CliParameter
@@ -87,6 +84,7 @@ mimetypes.add_type('text/rtf', '.rtf')
 
 log = logger.create()
 
+
 class SHA256SessionInterface(SecureCookieSessionInterface):
     def get_signing_serializer(self, app):
         if not app.secret_key:
@@ -102,10 +100,8 @@ class SHA256SessionInterface(SecureCookieSessionInterface):
             signer_kwargs=signer_kwargs
         )
 
-# Force itsdangerous to avoid SHA1 in FIPS environments.
-# itsdangerous lazily resolves SHA1 internally; this override
-# replaces it with SHA256 to remain FIPS-compliant.
-itsdangerous.signer._lazy_sha1 = hashlib.sha256
+# We set Signer.default_digest_method later in create_app() to force SHA256
+# (avoids touching protected internals like `_lazy_sha1`).
 
 app = Flask(__name__)
 app.config.update(
