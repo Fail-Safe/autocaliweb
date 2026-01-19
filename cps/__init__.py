@@ -29,7 +29,6 @@ import hashlib
 from flask import Flask
 from flask.sessions import SecureCookieSessionInterface
 from itsdangerous import URLSafeTimedSerializer, Signer
-import itsdangerous
 
 from . import logger
 from .cli import CliParameter
