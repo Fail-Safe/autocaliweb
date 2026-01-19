@@ -84,7 +84,6 @@ mimetypes.add_type('text/rtf', '.rtf')
 log = logger.create()
 
 
-<<<<<<< HEAD
 def _install_runtime_debug_hooks():
     """Install low-overhead debugging hooks for live CPU/memory investigations.
     Useful for diagnosing issues like high CPU usage or memory leaks, especially
@@ -142,8 +141,6 @@ def _install_runtime_debug_hooks():
         pass
 
 
-=======
->>>>>>> 3e96bd93 (Reorganize imports to satisfy pylint recommendations)
 class SHA256SessionInterface(SecureCookieSessionInterface):
     def get_signing_serializer(self, app):
         if not app.secret_key:
