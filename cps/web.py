@@ -1280,7 +1280,20 @@ def get_cover(book_id, resolution=None):
         'lg': constants.COVER_THUMBNAIL_LARGE,
     }
     cover_resolution = resolutions.get(resolution, None)
-    return get_book_cover(book_id, cover_resolution)
+    response = get_book_cover(book_id, cover_resolution)
+    try:
+        if resolution in ("sm", "md", "lg") and response is not None:
+            response = make_response(response)
+            # These URLs are already cache-busted (e.g. ?c=<timestamp>), so it is safe to
+            # cache them aggressively to avoid per-tile conditional requests.
+            cache_busted = any(k in request.args for k in ("c", "cb"))
+            if cache_busted:
+                response.headers["Cache-Control"] = "private, max-age=2592000, immutable"  # 30 days
+            else:
+                response.headers["Cache-Control"] = "private, max-age=3600"  # 1 hour
+    except Exception:
+        pass
+    return response
 
 
 @web.route("/series_cover/<int:series_id>")
@@ -1294,7 +1307,18 @@ def get_series_cover(series_id, resolution=None):
         'lg': constants.COVER_THUMBNAIL_LARGE,
     }
     cover_resolution = resolutions.get(resolution, None)
-    return get_series_cover_thumbnail(series_id, cover_resolution)
+    response = get_series_cover_thumbnail(series_id, cover_resolution)
+    try:
+        if resolution in ("sm", "md", "lg") and response is not None:
+            response = make_response(response)
+            cache_busted = any(k in request.args for k in ("c", "cb"))
+            if cache_busted:
+                response.headers["Cache-Control"] = "private, max-age=2592000, immutable"  # 30 days
+            else:
+                response.headers["Cache-Control"] = "private, max-age=3600"  # 1 hour
+    except Exception:
+        pass
+    return response
 
 
 
