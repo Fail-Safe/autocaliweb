@@ -650,6 +650,17 @@ def add_missing_tables(engine, _session):
         ArchivedBook.__table__.create(bind=engine)
     if not engine.dialect.has_table(engine.connect(), "thumbnail"):
         Thumbnail.__table__.create(bind=engine)
+    # Indexes: keep thumbnail lookups fast even on large libraries.
+    # (No Alembic here; create indexes opportunistically.)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_thumbnail_lookup "
+                "ON thumbnail (type, entity_id, resolution, format, expiration, generated_at, id)"
+            ))
+    except Exception:
+        # Non-fatal: index creation can fail on read-only DBs.
+        pass
     if not engine.dialect.has_table(engine.connect(), "kosync_progress"):
         KOSyncProgress.__table__.create(bind=engine)
 
