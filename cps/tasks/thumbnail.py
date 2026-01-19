@@ -17,6 +17,7 @@
 #   along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import os
+import uuid
 from shutil import copyfile, copyfileobj
 from urllib.request import urlopen
 from io import BytesIO
@@ -90,7 +91,8 @@ class TaskGenerateCoverThumbnails(CalibreTask):
                 generated = self.create_book_cover_thumbnails(book)
 
                 # Increment the progress
-                self.progress = (1.0 / count) * i
+                # Progress is based on books scanned (not thumbnails).
+                self.progress = (1.0 / count) * (i + 1) if count else 1.0
 
                 if generated > 0:
                     total_generated += generated
@@ -126,33 +128,60 @@ class TaskGenerateCoverThumbnails(CalibreTask):
             .filter(ub.Thumbnail.type == constants.THUMBNAIL_TYPE_COVER) \
             .filter(ub.Thumbnail.entity_id == book_id) \
             .filter(or_(ub.Thumbnail.expiration.is_(None), ub.Thumbnail.expiration > datetime.now(timezone.utc))) \
+            .order_by(ub.Thumbnail.generated_at.desc(), ub.Thumbnail.id.desc()) \
             .all()
 
     def create_book_cover_thumbnails(self, book):
+        def norm_fmt(fmt: str) -> str:
+            fmt = (fmt or '').lower()
+            return 'jpg' if fmt == 'jpeg' else fmt
+
         generated = 0
         book_cover_thumbnails = self.get_book_cover_thumbnails(book.id)
 
         thumb_map = {}
+        duplicates_to_delete = []
         for t in book_cover_thumbnails:
-            thumb_map[(t.resolution, t.format.lower())] = t
+            key = (t.resolution, norm_fmt(t.format))
+            if key not in thumb_map:
+                thumb_map[key] = t
+            else:
+                duplicates_to_delete.append(t)
+
+        duplicate_ids = {t.id for t in duplicates_to_delete if getattr(t, 'id', None) is not None}
 
         # For each resolution, check if a thumbnail exists and file is present
         formats = ['jpg', 'webp']
         for resolution in self.resolutions:
             for fmt in formats:
                 thumb = thumb_map.get((resolution, fmt))
-                file_missing = True
                 if thumb:
+                    # Normalize legacy alias format in-place.
+                    if (thumb.format or '').lower() == 'jpeg':
+                        thumb.format = 'jpg'
                     file_missing = not self.cache.get_cache_file_exists(thumb.filename, constants.CACHE_TYPE_THUMBNAILS)
-                if not thumb or file_missing:
+                    if file_missing:
+                        generated += 1
+                        # Re-generate into the existing thumbnail row to avoid creating duplicate DB entries.
+                        self.update_book_cover_thumbnail(book, thumb)
+                else:
                     generated += 1
-                    self.create_book_cover_single_thumbnail(book, resolution)
+                    self.create_book_cover_single_thumbnail_format(book, resolution, fmt)
 
         # Replace outdated or missing thumbnails
         for thumbnail in book_cover_thumbnails:
             try:
-                legacy_naming = not (thumbnail.filename.startswith('book_') or thumbnail.filename.startswith('series_'))
-                wrong_format = thumbnail.format.lower() not in formats
+                # Skip duplicates we intend to delete.
+                if getattr(thumbnail, 'id', None) in duplicate_ids:
+                    continue
+
+                # "Legacy" refers to older book_/series_ naming. UUID-based filenames are current.
+                legacy_naming = thumbnail.filename.startswith('book_') or thumbnail.filename.startswith('series_')
+
+                fmt_norm = norm_fmt(thumbnail.format)
+                if (thumbnail.format or '').lower() == 'jpeg':
+                    thumbnail.format = 'jpg'
+                wrong_format = fmt_norm not in formats
                 source_newer = book.last_modified.replace(tzinfo=None) > thumbnail.generated_at
 
                 if legacy_naming or wrong_format:
@@ -181,30 +210,44 @@ class TaskGenerateCoverThumbnails(CalibreTask):
             except Exception as ex:
                 self.log.debug(f'Thumbnail migration/update issue for book {book.id}: {ex}')
 
+        # Delete duplicate rows (and their orphan files) for this book.
+        if duplicates_to_delete:
+            try:
+                for dup in duplicates_to_delete:
+                    try:
+                        self.cache.delete_cache_file(dup.filename, constants.CACHE_TYPE_THUMBNAILS)
+                    except Exception:
+                        pass
+                    self.app_db_session.delete(dup)
+                self.app_db_session.commit()
+            except Exception:
+                self.app_db_session.rollback()
+
         return generated
 
 
     def create_book_cover_single_thumbnail_format(self, book, resolution, fmt):
         thumbnail = ub.Thumbnail()
+        # Set uuid/filename eagerly so we can write the file before committing the DB row.
+        # This prevents the DB from accumulating thumbnail rows when file generation is slow
+        # or the task is interrupted.
+        thumbnail.uuid = str(uuid.uuid4())
         thumbnail.type = constants.THUMBNAIL_TYPE_COVER
         thumbnail.entity_id = book.id
         thumbnail.format = fmt
         thumbnail.resolution = resolution
         thumbnail.generated_at = datetime.now(timezone.utc)
         thumbnail.expiration = datetime.now(timezone.utc) + timedelta(days=10)
+        thumbnail.filename = f"{thumbnail.uuid}.{fmt}"
 
         self.app_db_session.add(thumbnail)
         try:
-            self.app_db_session.commit()
             self.generate_book_thumbnail(book, thumbnail)
+            self.app_db_session.commit()
         except FileNotFoundError as ex:
             # Missing cover file: treat as non-fatal and avoid repeated retry noise.
             self.log.debug(f'Skipping {fmt.upper()} book thumbnail for book {getattr(book, "id", "?")}: {ex}')
-            try:
-                self.app_db_session.delete(thumbnail)
-                self.app_db_session.commit()
-            except Exception:
-                self.app_db_session.rollback()
+            self.app_db_session.rollback()
         except Exception as ex:
             self.log.debug(f'Error creating {fmt.upper()} book thumbnail: ' + str(ex))
             self._handleError(f'Error creating {fmt.upper()} book thumbnail: ' + str(ex))
