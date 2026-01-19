@@ -27,6 +27,9 @@ import mimetypes
 import hashlib
 
 from flask import Flask
+from .MyLoginManager import MyLoginManager
+from flask_principal import Principal
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask.sessions import SecureCookieSessionInterface
 from itsdangerous import URLSafeTimedSerializer, Signer
 
