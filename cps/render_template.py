@@ -27,6 +27,30 @@ from . import config, constants, logger, ub, calibre_db, db
 from .ub import User
 from .generated_shelves import list_generated_shelves
 
+
+def _get_user_kobo_collections_mode(user=None):
+    """Get the Kobo collections sync mode for a user.
+
+    Returns: 'all', 'selected', or 'hybrid'
+    Priority: user setting > global config > default ('selected').
+    Note: Duplicated here to avoid circular imports from shelf module.
+    """
+    mode = "selected"
+    try:
+        if user is not None:
+            user_mode = getattr(user, "kobo_sync_collections_mode", None)
+            if user_mode:
+                mode = user_mode.strip().lower()
+            else:
+                mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
+        else:
+            mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
+    except Exception:
+        mode = "selected"
+    if mode not in ("all", "selected", "hybrid"):
+        mode = "selected"
+    return mode
+
 # CWA specific imports
 import requests
 from datetime import datetime
@@ -121,7 +145,7 @@ def get_sidebar_config(kwargs=None):
 
     # In Kobo hybrid mode we use a local-only opt-in shelf. Ensure it exists so it can be managed from the UI.
     try:
-        kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "") or "").strip().lower()
+        kobo_collections_mode = _get_user_kobo_collections_mode(current_user)
         if (not current_user.is_anonymous) and kobo_collections_mode == "hybrid":
             shelf_name = "Kobo Sync"
             shelf = (
@@ -144,11 +168,13 @@ def get_sidebar_config(kwargs=None):
         or_(ub.Shelf.is_public == 1, ub.Shelf.user_id == current_user.id))
     # Hide the local-only Kobo opt-in shelf unless it is used (Hybrid mode).
     try:
-        kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "") or "").strip().lower()
+        kobo_collections_mode = _get_user_kobo_collections_mode(current_user)
         if (not current_user.is_anonymous) and kobo_collections_mode != "hybrid":
             manual_shelves_query = manual_shelves_query.filter(
                 or_(ub.Shelf.user_id != current_user.id, ub.Shelf.name != "Kobo Sync")
             )
+    except Exception:
+        pass
     except Exception:
         pass
     manual_shelves = manual_shelves_query.order_by(ub.Shelf.name).all()

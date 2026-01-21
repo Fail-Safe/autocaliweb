@@ -259,6 +259,10 @@
               {% endfor %}
               {% if current_user.is_authenticated or g.allow_anonymous %}
                 <li class="nav-head hidden-xs public-shelves">{{_('Shelves')}}</li>
+                {% if not current_user.is_anonymous %}
+                <li id="nav_shelveslist" {% if page == 'shelf_table' %}class="active"{% endif %}><a href="{{url_for('shelf.shelves_table')}}"><span class="glyphicon glyphicon-th-list"></span> {{_('Shelves List')}}</a></li>
+                <li class="divider" style="border-bottom: 1px solid #ddd; margin: 5px 0;"></li>
+                {% endif %}
                 {% for shelf in g.shelves_access %}
                   <li>
                     <a class="shelf-link" href="{% if shelf.is_generated %}{{ url_for('shelf.show_generated_shelf', source=shelf.source, value=shelf.value) }}{% else %}{{ url_for('shelf.show_shelf', shelf_id=shelf.id) }}{% endif %}"{% if shelf.is_generated %} data-toggle="tooltip" title="{{ generated_shelf_badge_text(shelf.source) }}"{% endif %}>

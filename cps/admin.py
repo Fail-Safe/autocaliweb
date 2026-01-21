@@ -53,6 +53,7 @@ from .usermanagement import user_login_required
 from .cw_babel import get_available_translations, get_available_locale, get_user_locale_language
 from . import debug_info
 from .string_helper import strip_whitespaces
+from .shelf import ensure_kobo_opt_in_shelf
 
 log = logger.create()
 
@@ -1909,16 +1910,7 @@ def _configuration_update_helper():
         _config_checkbox_int(to_save, "config_public_reg")
         _config_checkbox_int(to_save, "config_register_email")
         reboot_required |= _config_checkbox_int(to_save, "config_kobo_sync")
-        # Kobo collections (shelves) sync mode: all | selected | hybrid
-        kobo_mode = (to_save.get("config_kobo_sync_collections_mode") or "selected").strip().lower()
-        if kobo_mode not in ("all", "selected", "hybrid"):
-            kobo_mode = "selected"
-        config.config_kobo_sync_collections_mode = kobo_mode
-        if kobo_mode == "selected":
-            _config_checkbox(to_save, "config_kobo_sync_include_generated_shelves_in_selected")
-            _config_checkbox(to_save, "config_kobo_sync_all_generated_shelves")
         _config_int(to_save, "config_external_port")
-        _config_int(to_save, "config_kobo_sync_item_limit")
         _config_checkbox_int(to_save, "config_kobo_proxy")
         _config_checkbox_int(to_save, "config_hardcover_sync")
         _config_checkbox_int(to_save, "config_hardcover_annosync")
@@ -2096,6 +2088,14 @@ def _handle_new_user(to_save, content, languages, translations, kobo_support):
         content.denied_column_value = config.config_denied_column_value
         # No default value for kobo sync shelf setting
         content.kobo_only_shelves_sync = to_save.get("kobo_only_shelves_sync", 0) == "on"
+        content.kobo_sync_collections_mode = to_save.get("kobo_sync_collections_mode", "selected")
+        content.kobo_generated_shelves_sync = to_save.get("kobo_generated_shelves_sync", 0) == "on"
+        content.kobo_generated_shelves_all_books = to_save.get("kobo_generated_shelves_all_books", 0) == "on"
+        content.kobo_sync_empty_collections = to_save.get("kobo_sync_empty_collections", 0) == "on"
+        try:
+            content.kobo_sync_item_limit = int(to_save.get("kobo_sync_item_limit", 100) or 100)
+        except (ValueError, TypeError):
+            content.kobo_sync_item_limit = 100
         content.kobo_plus = to_save.get("kobo_plus", 0) == "on"
         content.kobo_overdrive = to_save.get("kobo_overdrive", 0) == "on"
         content.kobo_audiobooks = to_save.get("kobo_audiobooks", 0) == "on"
@@ -2183,6 +2183,28 @@ def _handle_edit_user(to_save, content, languages, translations, kobo_support):
         # which don't have to be synced have to be removed (added to Shelf archive)
         if old_state == 0 and content.kobo_only_shelves_sync == 1:
             kobo_sync_status.update_on_sync_shelfs(content.id)
+
+        # Check if Kobo sync mode is changing - if so, force a full resync
+        old_kobo_mode = content.kobo_sync_collections_mode or "selected"
+        new_kobo_mode = to_save.get("kobo_sync_collections_mode", "selected")
+        if old_kobo_mode != new_kobo_mode:
+            # Delete sync records to force full resync on next device connection
+            ub.session.query(ub.KoboSyncedBooks).filter(
+                ub.KoboSyncedBooks.user_id == content.id
+            ).delete()
+            flash(_("Kobo sync mode changed. A full resync will occur on next device sync."), category="info")
+
+        content.kobo_sync_collections_mode = new_kobo_mode
+        # Create the opt-in shelf when switching to hybrid mode
+        if content.kobo_sync_collections_mode == "hybrid":
+            ensure_kobo_opt_in_shelf(content.id)
+        content.kobo_generated_shelves_sync = int(to_save.get("kobo_generated_shelves_sync") == "on") or 0
+        content.kobo_generated_shelves_all_books = int(to_save.get("kobo_generated_shelves_all_books") == "on") or 0
+        content.kobo_sync_empty_collections = int(to_save.get("kobo_sync_empty_collections") == "on") or 0
+        try:
+            content.kobo_sync_item_limit = int(to_save.get("kobo_sync_item_limit", 100) or 100)
+        except (ValueError, TypeError):
+            content.kobo_sync_item_limit = 100
         content.kobo_plus = int(to_save.get("kobo_plus") == "on") or 0
         content.kobo_overdrive = int(to_save.get("kobo_overdrive") == "on") or 0
         content.kobo_audiobooks = int(to_save.get("kobo_audiobooks") == "on") or 0

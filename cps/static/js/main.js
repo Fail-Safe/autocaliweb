@@ -864,7 +864,23 @@ $(function () {
     });
 
     $("#user_submit").click(function () {
+        var $modeSelect = $("#kobo_sync_collections_mode");
+        if ($modeSelect.length) {
+            var originalMode = $modeSelect.data("original-mode") || "";
+            var currentMode = $modeSelect.val() || "";
+            if (originalMode && currentMode && originalMode !== currentMode) {
+                // Mode changed - show confirmation modal
+                $("#kobo_mode_change_modal").modal("show");
+                return;
+            }
+        }
         this.closest("form").submit();
+    });
+
+    // Handle confirmation of Kobo mode change
+    $("#kobo_mode_change_confirm").click(function () {
+        $("#kobo_mode_change_modal").modal("hide");
+        $("#user_submit").closest("form").submit();
     });
 
     function handle_response(data) {

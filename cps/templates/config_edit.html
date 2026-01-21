@@ -406,56 +406,7 @@
                   >{{_('Proxy unknown requests to Kobo Store')}}</label
                 >
               </div>
-              <div class="form-group" style="margin-left: 10px">
-                <label for="config_kobo_sync_collections_mode"
-                  >{{_('Kobo Collections (Autocaliweb Shelves) Sync')}}</label
-                >
-                <select
-                  class="form-control"
-                  id="config_kobo_sync_collections_mode"
-                  name="config_kobo_sync_collections_mode"
-                  data-control="kobo-collections-mode"
-                >
-                  {% set _kobo_collections_mode = (config.config_kobo_sync_collections_mode or 'selected')|trim|lower %}
-                  <option value="all" {% if _kobo_collections_mode == 'all' %}selected{% endif %}>{{_('Sync all shelves')}}</option>
-                  <option value="selected" {% if _kobo_collections_mode == 'selected' %}selected{% endif %}>{{_('Sync selected shelves')}}</option>
-                  <option value="hybrid" {% if _kobo_collections_mode == 'hybrid' %}selected{% endif %}>{{_('Hybrid sync')}}</option>
-                </select>
-                <p class="help-block">
-                  {{_('Kobo Collections correspond to Autocaliweb Shelves.')}}
-                  {{_('Selected/Hybrid use only shelves marked for Kobo sync.')}}
-                  {{_('Hybrid also includes generated shelves, but only for books added to the local-only “Kobo Sync” shelf (this shelf is not created on the Kobo).')}}
-                </p>
-              </div>
 
-              <div class="form-group" style="margin-left: 10px" data-related="kobo-collections-mode-selected">
-                <input
-                  type="checkbox"
-                  id="config_kobo_sync_include_generated_shelves_in_selected"
-                  name="config_kobo_sync_include_generated_shelves_in_selected"
-                  {% if config.config_kobo_sync_include_generated_shelves_in_selected %}checked{% endif %}
-                />
-                <label for="config_kobo_sync_include_generated_shelves_in_selected"
-                  >{{_('Enable generated shelf sync')}}</label
-                >
-                <p class="help-block">
-                  {{_('Sync generated shelves (Author, Series, etc.) as Kobo Collections. Use "Edit Shelf" on each generated shelf to enable/disable Kobo sync for individual shelves.')}}
-                </p>
-              </div>
-              <div class="form-group" style="margin-left: 20px" data-related="kobo-collections-mode-selected">
-                <input
-                  type="checkbox"
-                  id="config_kobo_sync_all_generated_shelves"
-                  name="config_kobo_sync_all_generated_shelves"
-                  {% if config.config_kobo_sync_all_generated_shelves %}checked{% endif %}
-                />
-                <label for="config_kobo_sync_all_generated_shelves"
-                  >{{_('Include all library books')}}</label
-                >
-                <p class="help-block">
-                  {{_('When enabled, generated shelves include ALL books in your library. When disabled, only books that are also in regular Kobo-synced shelves are included.')}}
-                </p>
-              </div>
               <div class="form-group" style="margin-left: 10px">
                 <label for="config_external_port"
                   >{{_('Server External Port (for port forwarded API
@@ -472,23 +423,6 @@
                   autocomplete="off"
                   required
                 />
-              </div>
-              <div class="form-group" style="margin-left: 10px">
-                <label for="config_kobo_sync_item_limit">{{_('Kobo sync item limit (items per sync)')}}</label>
-                <input
-                  type="number"
-                  min="10"
-                  max="500"
-                  class="form-control"
-                  name="config_kobo_sync_item_limit"
-                  id="config_kobo_sync_item_limit"
-                  value="{{ config.config_kobo_sync_item_limit or 100 }}"
-                  autocomplete="off"
-                  required
-                />
-                <p class="help-block">
-                  {{_('Maximum number of items (books, reading states, collections) returned in a single sync response. Lower values reduce device load but increase round-trips.')}}
-                </p>
               </div>
               {% if feature_support['hardcover'] %}
               <div class="form-group" style="margin-left: 10px">

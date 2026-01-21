@@ -253,11 +253,23 @@ class User(UserBase, Base):
     allowed_column_value = Column(String, default="")
     remote_auth_token = relationship('RemoteAuthToken', backref='user', lazy='dynamic')
     view_settings = Column(JSON, default={})
+    # Legacy field - replaced by kobo_sync_collections_mode, kept for migration
     kobo_only_shelves_sync = Column(Integer, default=0)
     kobo_plus = Column(Integer, default=0)
     kobo_overdrive = Column(Integer, default=0)
     kobo_audiobooks = Column(Integer, default=0)
     kobo_instapaper = Column(Integer, default=0)
+    # Per-user Kobo sync settings (moved from global config)
+    # Kobo Collections sync mode: "all", "selected", or "hybrid"
+    kobo_sync_collections_mode = Column(String, default="selected")
+    # Enable generated shelf sync (Author, Series, etc.)
+    kobo_generated_shelves_sync = Column(Boolean, default=False)
+    # When true, generated shelves include ALL books in library
+    kobo_generated_shelves_all_books = Column(Boolean, default=False)
+    # When true, sync empty collections (shelves with 0 books) to Kobo
+    kobo_sync_empty_collections = Column(Boolean, default=False)
+    # Max items per sync response (10-500)
+    kobo_sync_item_limit = Column(Integer, default=100)
     hardcover_token = Column(String, default="")
     auto_send_enabled = Column(Boolean, default=False)
 
@@ -794,6 +806,11 @@ def migrate_user_table(engine, _session):
             ('kobo_overdrive', "INTEGER NOT NULL DEFAULT 0"),
             ('kobo_audiobooks', "INTEGER NOT NULL DEFAULT 0"),
             ('kobo_instapaper', "INTEGER NOT NULL DEFAULT 0"),
+            ('kobo_sync_collections_mode', "VARCHAR(32) NOT NULL DEFAULT 'selected'"),
+            ('kobo_generated_shelves_sync', "BOOLEAN NOT NULL DEFAULT 0"),
+            ('kobo_generated_shelves_all_books', "BOOLEAN NOT NULL DEFAULT 0"),
+            ('kobo_sync_empty_collections', "BOOLEAN NOT NULL DEFAULT 0"),
+            ('kobo_sync_item_limit', "INTEGER NOT NULL DEFAULT 100"),
             ('hardcover_token', "VARCHAR(255) NOT NULL DEFAULT ''"),
             ('auto_send_enabled', "BOOLEAN NOT NULL DEFAULT 0"),
         ]
