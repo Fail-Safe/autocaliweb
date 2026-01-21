@@ -493,23 +493,6 @@
                   required
                 />
               </div>
-              <div class="form-group" style="margin-left: 10px">
-                <label for="config_kobo_sync_item_limit">{{_('Kobo sync item limit (items per sync)')}}</label>
-                <input
-                  type="number"
-                  min="10"
-                  max="500"
-                  class="form-control"
-                  name="config_kobo_sync_item_limit"
-                  id="config_kobo_sync_item_limit"
-                  value="{{ config.config_kobo_sync_item_limit or 100 }}"
-                  autocomplete="off"
-                  required
-                />
-                <p class="help-block">
-                  {{_('Maximum number of items (books, reading states, collections) returned in a single sync response. Lower values reduce device load but increase round-trips.')}}
-                </p>
-              </div>
               {% if feature_support['hardcover'] %}
               <div class="form-group" style="margin-left: 10px">
                 <input

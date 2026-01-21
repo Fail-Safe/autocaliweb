@@ -61,17 +61,132 @@ KOBO_STOREAPI_URL = "https://storeapi.kobo.com"
 KOBO_IMAGEHOST_URL = "https://cdn.kobo.com/book-images"
 
 
-def get_sync_item_limit():
+def get_sync_item_limit(user=None):
     """Return the configured sync item limit clamped to [10, 500].
 
     This controls how many items (books, reading states, and collections)
     are included in a single sync response to the device.
+
+    Priority: user setting > global config > default (100).
     """
+    limit = 100
     try:
-        limit = int(getattr(config, "config_kobo_sync_item_limit", 100) or 100)
+        # First try user-level setting
+        if user is not None:
+            user_limit = getattr(user, "kobo_sync_item_limit", None)
+            if user_limit is not None:
+                limit = int(user_limit)
+            else:
+                # Fall back to global config
+                limit = int(getattr(config, "config_kobo_sync_item_limit", 100) or 100)
+        else:
+            limit = int(getattr(config, "config_kobo_sync_item_limit", 100) or 100)
     except Exception:
         limit = 100
     return max(10, min(500, limit))
+
+
+def get_user_kobo_collections_mode(user=None):
+    """Get the Kobo collections sync mode for a user.
+
+    Returns: "all", "selected", or "hybrid"
+    Priority: user setting > global config > default ("selected").
+    """
+    mode = "selected"
+    try:
+        # First try user-level setting
+        if user is not None:
+            user_mode = getattr(user, "kobo_sync_collections_mode", None)
+            if user_mode:
+                mode = user_mode.strip().lower()
+            else:
+                # Fall back to global config
+                mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
+        else:
+            mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
+    except Exception:
+        mode = "selected"
+    if mode not in ("all", "selected", "hybrid"):
+        mode = "selected"
+    return mode
+
+
+def get_user_generated_shelves_sync(user=None):
+    """Check if user has generated shelves sync enabled.
+
+    Returns True if:
+    1. User has explicitly enabled generated shelves sync in their settings, OR
+    2. User has any generated shelves marked for Kobo sync in GeneratedShelfKoboSync table
+    """
+    try:
+        if user is not None:
+            # First check explicit user setting - if True, return immediately
+            user_setting = getattr(user, "kobo_generated_shelves_sync", False)
+            if user_setting:
+                return True
+
+            # Check if user has ANY generated shelves enabled for sync
+            # This allows per-shelf control without needing a master toggle
+            try:
+                enabled_count = (
+                    ub.session.query(ub.GeneratedShelfKoboSync)
+                    .filter(
+                        ub.GeneratedShelfKoboSync.user_id == user.id,
+                        ub.GeneratedShelfKoboSync.kobo_sync == True,
+                    )
+                    .count()
+                )
+                if enabled_count > 0:
+                    log.debug("get_user_generated_shelves_sync: user %s has %d generated shelves enabled",
+                              user.id, enabled_count)
+                    return True
+            except Exception as e:
+                log.warning("get_user_generated_shelves_sync: error checking GeneratedShelfKoboSync: %s", e)
+
+            # Default: generated shelves not enabled
+            return False
+        else:
+            return False
+    except Exception as e:
+        log.warning("get_user_generated_shelves_sync: unexpected error: %s", e)
+        return False
+
+
+def get_user_generated_shelves_all_books(user=None):
+    """Check if generated shelves should include all library books.
+
+    User setting controls this; defaults to False (only books in Kobo-synced shelves).
+    """
+    try:
+        if user is not None:
+            user_setting = getattr(user, "kobo_generated_shelves_all_books", None)
+            if user_setting is not None:
+                return bool(user_setting)
+            else:
+                return False  # Default: only books in kobo-synced shelves
+        else:
+            return False
+    except Exception:
+        return False
+
+
+def get_user_sync_empty_collections(user=None):
+    """Check if user wants to sync empty collections (shelves with 0 books).
+
+    User setting controls this; defaults to False (skip empty collections).
+    """
+    try:
+        if user is not None:
+            user_setting = getattr(user, "kobo_sync_empty_collections", None)
+            if user_setting is not None:
+                return bool(user_setting)
+            else:
+                return False  # Default: don't sync empty collections
+        else:
+            return False
+    except Exception:
+        return False
+
 
 # Reusable session for Kobo store proxy requests (connection pooling)
 _kobo_store_session = None
@@ -200,15 +315,13 @@ def _redact_auth_token_in_path(path: str) -> str:
     except Exception:
         return path
 
-def _effective_only_kobo_shelves_sync():
+def _effective_only_kobo_shelves_sync(user=None):
     """Determine whether book sync should be restricted to kobo_sync-enabled shelves.
 
     Returns False (sync all books) when mode is "all".
     Returns True (restrict to kobo_sync shelves) for "selected" or "hybrid" modes.
     """
-    mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-    if mode not in ("all", "selected", "hybrid"):
-        mode = "selected"
+    mode = get_user_kobo_collections_mode(user)
     return mode in ("selected", "hybrid")
 
 
@@ -317,6 +430,7 @@ def HandleSyncRequest():
         sync_token.books_last_modified = datetime.min
         sync_token.books_last_created = datetime.min
         sync_token.reading_state_last_modified = datetime.min
+        sync_token.tags_last_modified = datetime.min  # Reset to resync all shelves/collections
 
     new_books_last_modified = sync_token.books_last_modified  # needed for sync selected shelfs only
     new_books_last_created = sync_token.books_last_created  # needed to distinguish between new and changed entitlement
@@ -333,9 +447,7 @@ def HandleSyncRequest():
     # on "Downloading book covers" while requests slow down.
     # Use the scheduler/admin task to generate thumbnails instead.
 
-    kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-    if kobo_collections_mode not in ("all", "selected", "hybrid"):
-        kobo_collections_mode = "selected"
+    kobo_collections_mode = get_user_kobo_collections_mode(current_user)
     kobo_opt_in_shelf_name = "Kobo Sync"
     hybrid_opt_in_book_ids = set()
 
@@ -393,7 +505,7 @@ def HandleSyncRequest():
         except Exception as e:
             log.debug("Hybrid opt-in debug failed: %s", e)
 
-    only_kobo_shelves = _effective_only_kobo_shelves_sync()
+    only_kobo_shelves = _effective_only_kobo_shelves_sync(current_user)
 
     if only_kobo_shelves:
         try:
@@ -406,6 +518,7 @@ def HandleSyncRequest():
             else:
                 allowed_shelf_filter = (ub.Shelf.kobo_sync == True)
 
+            # Get books from regular shelves with kobo_sync enabled
             allowed_books_query = (
                 ub.session.query(ub.BookShelf.book_id)
                 .join(ub.Shelf, ub.BookShelf.shelf == ub.Shelf.id)
@@ -416,6 +529,43 @@ def HandleSyncRequest():
                 .distinct()
             )
             allowed_books_ids = {item.book_id for item in allowed_books_query}
+
+            # In selected mode, also include books from generated shelves with kobo_sync enabled
+            if kobo_collections_mode == "selected" and get_user_generated_shelves_sync(current_user):
+                try:
+                    # Get all generated shelves the user has enabled for sync
+                    enabled_gen_shelves = (
+                        ub.session.query(
+                            ub.GeneratedShelfKoboSync.source,
+                            ub.GeneratedShelfKoboSync.value,
+                        )
+                        .filter(
+                            ub.GeneratedShelfKoboSync.user_id == current_user.id,
+                            ub.GeneratedShelfKoboSync.kobo_sync == True,
+                        )
+                        .all()
+                    )
+                    log.debug("Kobo sync: found %d generated shelves enabled for sync", len(enabled_gen_shelves))
+
+                    # For each enabled generated shelf, get the books that match
+                    for source, value in enabled_gen_shelves:
+                        shelf_filter = generated_shelf_filter(source, value)
+                        if shelf_filter is not None:
+                            gen_books = (
+                                calibre_db.session.query(db.Books.id)
+                                .filter(calibre_db.common_filters(), shelf_filter)
+                                .all()
+                            )
+                            gen_book_ids = {row[0] for row in gen_books if row}
+                            allowed_books_ids.update(gen_book_ids)
+                            log.debug(
+                                "Kobo sync: generated shelf %s:%s adds %d books",
+                                source, value, len(gen_book_ids)
+                            )
+                except Exception as e:
+                    log.warning("Error fetching books from generated shelves: %s", e)
+
+            log.debug("Kobo sync: total allowed_books_ids = %d", len(allowed_books_ids))
 
             if kobo_collections_mode == "hybrid":
                 try:
@@ -508,14 +658,15 @@ def HandleSyncRequest():
                            .filter(*extra_filters)
                            .distinct())
 
-        # In hybrid mode, the opt-in shelf is an explicit "sync this book" signal. Ensure those books are
-        # included even if already marked synced and nothing else changed.
-        if kobo_collections_mode == "hybrid" and hybrid_opt_in_book_ids:
-            opt_in_entries = (
+        # In selected mode, include books from generated shelves with kobo_sync enabled
+        if kobo_collections_mode == "selected" and allowed_books_ids:
+            # Get books that are in allowed_books_ids (from generated shelves) but not yet synced
+            # or have been modified since last sync
+            generated_shelf_entries = (
                 calibre_db.session.query(
                     db.Books,
                     ub.ArchivedBook.last_modified,
-                    ub.BookShelf.date_added,
+                    literal(None).label("date_added"),  # Generated shelves don't have date_added
                     ub.ArchivedBook.is_archived,
                     literal(False).label("deleted"),
                 )
@@ -527,18 +678,26 @@ def HandleSyncRequest():
                         ub.ArchivedBook.user_id == current_user.id,
                     ),
                 )
-                .join(ub.BookShelf, db.Books.id == ub.BookShelf.book_id)
-                .join(ub.Shelf)
                 .filter(
-                    ub.Shelf.user_id == current_user.id,
-                    ub.Shelf.name == kobo_opt_in_shelf_name,
-                    db.Books.id.in_(list(hybrid_opt_in_book_ids)),
+                    db.Books.id.in_(list(allowed_books_ids)),
+                    or_(
+                        db.Books.id.notin_(
+                            calibre_db.session.query(ub.KoboSyncedBooks.book_id)
+                            .filter(ub.KoboSyncedBooks.user_id == current_user.id)
+                        ),
+                        func.datetime(db.Books.last_modified) > sync_token.books_last_modified,
+                    ),
                 )
                 .filter(db.Data.format.in_(KOBO_FORMATS))
                 .filter(calibre_db.common_filters(allow_show_archived=True))
                 .distinct()
             )
-            shelf_entries = shelf_entries.union_all(opt_in_entries)
+            shelf_entries = shelf_entries.union_all(generated_shelf_entries)
+            log.debug("Kobo sync: added generated shelf books query to sync entries")
+
+        # In hybrid mode, the opt-in shelf is already represented by extra_filters.
+        # Do not union all opt-in books unconditionally, otherwise the sync will never converge
+        # (it bypasses sync_token gating and keeps returning the same first page forever).
 
         shelf_exists = (
             calibre_db.session.query(ub.BookShelf)
@@ -550,6 +709,8 @@ def HandleSyncRequest():
             .exists()
         )
 
+        # Build deletion query: synced books that are no longer in any kobo_sync-enabled shelf
+        # For generated shelves, we exclude books that are in allowed_books_ids
         deleted_entries = (
             calibre_db.session.query(
                 db.Books,
@@ -564,6 +725,9 @@ def HandleSyncRequest():
                                              ub.ArchivedBook.user_id == current_user.id))
             .filter(~shelf_exists)
         )
+        # Exclude books from generated shelves (they're in allowed_books_ids but not in BookShelf)
+        if allowed_books_ids:
+            deleted_entries = deleted_entries.filter(db.Books.id.notin_(list(allowed_books_ids)))
 
         changed_entries = (
             shelf_entries
@@ -588,7 +752,7 @@ def HandleSyncRequest():
                            .order_by(db.Books.id))
 
     reading_states_in_new_entitlements = []
-    sync_item_limit = get_sync_item_limit()
+    sync_item_limit = get_sync_item_limit(current_user)
     books = changed_entries.limit(sync_item_limit)
     books_list = books.all()
     log.debug("Books to Sync: {}".format(len(books_list)))
@@ -810,9 +974,26 @@ def generate_sync_response(sync_token, sync_results, set_cont=False):
         extra_headers["x-kobo-sync"] = "continue"
     sync_token.to_headers(extra_headers)
 
+    try:
+        token_val = extra_headers.get(SyncToken.SyncToken.SYNC_TOKEN_HEADER, "")
+        log.debug(
+            "Kobo sync response token: cont=%s header_len=%s header_prefix=%s books_last_modified=%s books_last_created=%s tags_last_modified=%s",
+            bool(set_cont),
+            len(token_val) if token_val else 0,
+            token_val[:12] if token_val else "",
+            getattr(sync_token, "books_last_modified", None),
+            getattr(sync_token, "books_last_created", None),
+            getattr(sync_token, "tags_last_modified", None),
+        )
+    except Exception:
+        pass
+
     # log.debug("Kobo Sync Content: {}".format(sync_results))
     # jsonify decodes the Unicode string different to what kobo expects
-    response = make_response(json.dumps(sync_results), extra_headers)
+    # NOTE: Don't rely on make_response() positional argument heuristics for headers.
+    # Some Flask/Werkzeug combinations won't apply a dict passed as the 2nd arg.
+    response = make_response(json.dumps(sync_results))
+    response.headers.update(extra_headers)
     response.headers["Content-Type"] = "application/json; charset=utf-8"
     return response
 
@@ -831,8 +1012,8 @@ def HandleMetadataRequest(book_uuid):
 
     # Helpful diagnostics for the common "why is this book on device?" question.
     try:
-        kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-        if kobo_collections_mode == "hybrid" and _effective_only_kobo_shelves_sync():
+        kobo_collections_mode = get_user_kobo_collections_mode(current_user)
+        if kobo_collections_mode == "hybrid" and _effective_only_kobo_shelves_sync(current_user):
             opt_in_shelf = _ensure_kobo_opt_in_shelf(current_user.id, "Kobo Sync")
             in_opt_in = bool(
                 ub.session.query(ub.BookShelf)
@@ -921,7 +1102,8 @@ def get_author(book):
     autor_roles = []
     seen = set()
     for author in book.authors:
-        raw_name = (getattr(author, "name", "") or "")
+        # Use author.sort for "Last, First" format; fall back to name if sort is empty
+        raw_name = (getattr(author, "sort", "") or getattr(author, "name", "") or "")
         if not raw_name or not raw_name.strip():
             log.debug("Kobo get_author: skipping empty author for book '%s' (id=%s)", book.title, book.id)
             continue
@@ -939,7 +1121,7 @@ def get_author(book):
         "Kobo get_author: book='%s' (id=%s) raw_authors=%s final_list=%s",
         book.title,
         book.id,
-        [getattr(a, "name", None) for a in (book.authors or [])],
+        [getattr(a, "sort", None) or getattr(a, "name", None) for a in (book.authors or [])],
         author_list,
     )
     return {
@@ -1217,11 +1399,10 @@ def HandleTagRemoveItem(tag_id):
 # Add new, changed, or deleted shelves to the sync_results.
 # Note: Public shelves that aren't owned by the user aren't supported.
 def sync_shelves(sync_token, sync_results, only_kobo_shelves=False, force_book_ids=None):
-    kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-    if kobo_collections_mode not in ("all", "selected", "hybrid"):
-        kobo_collections_mode = "selected"
+    kobo_collections_mode = get_user_kobo_collections_mode(current_user)
     kobo_opt_in_shelf_name = "Kobo Sync"
     opt_in_shelf_id = None
+    allow_empty_collections = get_user_sync_empty_collections(current_user)
 
     only_kobo_collections = kobo_collections_mode in ("selected", "hybrid")
 
@@ -1421,7 +1602,7 @@ def sync_shelves(sync_token, sync_results, only_kobo_shelves=False, force_book_i
         processed_shelf_ids.add(getattr(shelf, "id", None))
         if not shelf_lib.check_shelf_view_permissions(shelf):
             continue
-        tag = create_kobo_tag(shelf, allowed_book_ids=allowed_book_ids)
+        tag = create_kobo_tag(shelf, allowed_book_ids=allowed_book_ids, allow_empty=allow_empty_collections)
         if not tag:
             continue
         sync_results.append({"NewTag": tag})
@@ -1443,10 +1624,22 @@ def sync_shelves(sync_token, sync_results, only_kobo_shelves=False, force_book_i
         ):
             continue
 
-        tag = create_kobo_tag(shelf, allowed_book_ids=allowed_book_ids)
+        tag = create_kobo_tag(shelf, allowed_book_ids=allowed_book_ids, allow_empty=allow_empty_collections)
         if tag:
-            sync_results.append({"ChangedTag": tag})
-        elif allowed_book_ids is not None:
+            try:
+                items = tag.get("Tag", {}).get("Items")
+            except Exception:
+                items = None
+            if allow_empty_collections and items == []:
+                # Some devices won't create a brand-new collection from ChangedTag.
+                try:
+                    log.debug("Kobo shelves: forcing NewTag for empty shelf %r (uuid=%s)", shelf.name, shelf.uuid)
+                except Exception:
+                    pass
+                sync_results.append({"NewTag": tag})
+            else:
+                sync_results.append({"ChangedTag": tag})
+        elif allowed_book_ids is not None and not allow_empty_collections:
             # Shelf has no eligible items; ensure the collection is removed from the device.
             delete_ts = datetime.now(timezone.utc)
             new_tags_last_modified = max(_to_naive_datetime(delete_ts), new_tags_last_modified)
@@ -1475,9 +1668,9 @@ def sync_shelves(sync_token, sync_results, only_kobo_shelves=False, force_book_i
 
         new_tags_last_modified = max(shelf.last_modified, new_tags_last_modified)
 
-        tag = create_kobo_tag(shelf, allowed_book_ids=allowed_book_ids)
+        tag = create_kobo_tag(shelf, allowed_book_ids=allowed_book_ids, allow_empty=allow_empty_collections)
         if not tag:
-            if allowed_book_ids is not None:
+            if allowed_book_ids is not None and not allow_empty_collections:
                 # Shelf has no eligible items; ensure the collection is removed from the device.
                 delete_ts = now_ts
                 new_tags_last_modified = max(now_ts_naive, new_tags_last_modified)
@@ -1498,14 +1691,70 @@ def sync_shelves(sync_token, sync_results, only_kobo_shelves=False, force_book_i
             sync_results.append({"NewTag": tag})
             new_tags_last_modified = max(now_ts_naive, new_tags_last_modified)
         else:
-            if shelf.created > sync_token.tags_last_modified:
-                sync_results.append({
-                    "NewTag": tag
-                })
+            try:
+                items = tag.get("Tag", {}).get("Items")
+            except Exception:
+                items = None
+            if allow_empty_collections and items == []:
+                # Ensure empty collections get created even if the shelf itself is old.
+                try:
+                    log.debug("Kobo shelves: forcing NewTag for empty shelf %r (uuid=%s)", shelf.name, shelf.uuid)
+                except Exception:
+                    pass
+                sync_results.append({"NewTag": tag})
+            elif shelf.created > sync_token.tags_last_modified:
+                sync_results.append({"NewTag": tag})
             else:
-                sync_results.append({
-                    "ChangedTag": tag
-                })
+                sync_results.append({"ChangedTag": tag})
+
+    # If "sync empty collections" is enabled, make sure empty shelves are still emitted
+    # even when they haven't changed since the last sync token.
+    # Otherwise, pre-existing empty shelves can never be created on the device.
+    if allow_empty_collections:
+        try:
+            empty_shelves = (
+                ub.session.query(ub.Shelf)
+                .outerjoin(ub.BookShelf)
+                .filter(
+                    ub.Shelf.user_id == current_user.id,
+                    ub.BookShelf.id.is_(None),
+                    *extra_filters,
+                )
+                .all()
+            )
+        except Exception:
+            empty_shelves = []
+
+        for empty_shelf in empty_shelves or []:
+            if getattr(empty_shelf, "id", None) in processed_shelf_ids:
+                continue
+            processed_shelf_ids.add(getattr(empty_shelf, "id", None))
+            if not shelf_lib.check_shelf_view_permissions(empty_shelf):
+                continue
+            if kobo_collections_mode == "hybrid" and (
+                (opt_in_shelf_id is not None and getattr(empty_shelf, "id", None) == opt_in_shelf_id)
+                or (opt_in_shelf_id is None and empty_shelf.name == kobo_opt_in_shelf_name)
+            ):
+                continue
+            if empty_shelf.name == kobo_opt_in_shelf_name:
+                continue
+
+            tag = create_kobo_tag(empty_shelf, allowed_book_ids=allowed_book_ids, allow_empty=True)
+            if not tag:
+                continue
+            try:
+                log.debug(
+                    "Kobo shelves: emitting empty shelf %r (uuid=%s) due to sync-empty-collections",
+                    empty_shelf.name,
+                    empty_shelf.uuid,
+                )
+            except Exception:
+                pass
+            sync_results.append({"NewTag": tag})
+            try:
+                new_tags_last_modified = max(now_ts_naive, new_tags_last_modified)
+            except Exception:
+                pass
 
     # Generated shelves don't exist in the ub.Shelf table, so we sync them separately.
     # Mode meanings (Shelves in Autocaliweb == Collections on Kobo):
@@ -1515,11 +1764,11 @@ def sync_shelves(sync_token, sync_results, only_kobo_shelves=False, force_book_i
     #          the local-only 'Kobo Sync' shelf
     include_generated_in_selected = (
         kobo_collections_mode == "selected"
-        and getattr(config, "config_kobo_sync_include_generated_shelves_in_selected", False)
+        and get_user_generated_shelves_sync(current_user)
     )
     sync_all_generated = (
         include_generated_in_selected
-        and getattr(config, "config_kobo_sync_all_generated_shelves", False)
+        and get_user_generated_shelves_all_books(current_user)
     )
 
     # If the user enables generated shelves in selected mode (or changes the selector), the device's
@@ -1634,8 +1883,11 @@ def _get_or_create_kobo_tag_sync_state(user_id: int):
 
 
 def _filter_books_by_ids(query, book_ids, chunk_size: int = 900):
-    if not book_ids:
+    if book_ids is None:
         return query
+    if not book_ids:
+        # Empty list means no books should match - add an impossible filter
+        return query.filter(db.Books.id.in_([]))
     try:
         book_ids = list(dict.fromkeys(book_ids))
     except Exception:
@@ -1653,6 +1905,7 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
     if not selector:
         return new_tags_last_modified
 
+    allow_empty_collections = get_user_sync_empty_collections(current_user)
     eligible_book_ids = None
     trigger_ts = None
     if kobo_collections_mode == "hybrid":
@@ -1694,7 +1947,7 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
         except Exception:
             trigger_ts = None
     elif kobo_collections_mode == "selected":
-        if not getattr(config, "config_kobo_sync_include_generated_shelves_in_selected", False):
+        if not get_user_generated_shelves_sync(current_user):
             # Generated collections may have been created earlier in "all" mode.
             # If generation is disabled in selected mode, actively remove them so they don't linger.
             try:
@@ -1718,11 +1971,12 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
             return max(delete_ts_naive, new_tags_last_modified)
 
         # Check if user wants ALL generated shelves or just those for books in Kobo-synced shelves
-        sync_all_generated = getattr(config, "config_kobo_sync_all_generated_shelves", False)
+        sync_all_generated = get_user_generated_shelves_all_books(current_user)
 
         if not sync_all_generated:
             # Only include generated shelves for books that are in Kobo-synced shelves
-            eligible_book_ids = [
+            # Start with books from regular shelves with kobo_sync enabled
+            eligible_book_ids = set(
                 row[0]
                 for row in (
                     ub.session.query(ub.BookShelf.book_id)
@@ -1735,9 +1989,39 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
                     .all()
                 )
                 if row and row[0]
-            ]
-            if not eligible_book_ids:
-                # No eligible books => all generated collections should be removed.
+            )
+
+            # Also include books from generated shelves the user has enabled
+            try:
+                enabled_gen_shelves = (
+                    ub.session.query(
+                        ub.GeneratedShelfKoboSync.source,
+                        ub.GeneratedShelfKoboSync.value,
+                    )
+                    .filter(
+                        ub.GeneratedShelfKoboSync.user_id == current_user.id,
+                        ub.GeneratedShelfKoboSync.kobo_sync == True,
+                    )
+                    .all()
+                )
+                for source, value in enabled_gen_shelves:
+                    shelf_filter = generated_shelf_filter(source, value)
+                    if shelf_filter is not None:
+                        gen_book_ids = {
+                            row[0]
+                            for row in calibre_db.session.query(db.Books.id)
+                            .filter(calibre_db.common_filters(), shelf_filter)
+                            .all()
+                            if row
+                        }
+                        eligible_book_ids.update(gen_book_ids)
+            except Exception as e:
+                log.debug("Kobo generated shelves: error fetching generated shelf books: %s", e)
+
+            eligible_book_ids = list(eligible_book_ids) if eligible_book_ids else []
+
+            if not eligible_book_ids and not allow_empty_collections:
+                # No eligible books => all generated collections should be removed (unless empty collections allowed).
                 try:
                     shelves = list_generated_shelves()
                 except Exception:
@@ -1793,7 +2077,7 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
     except Exception:
         force_resync = False
 
-    sync_all_generated = getattr(config, "config_kobo_sync_all_generated_shelves", False)
+    sync_all_generated = get_user_generated_shelves_all_books(current_user)
 
     # Fallback: if sync_all is enabled and we have shelves, but the sync token is newer than
     # all book timestamps, nothing would ever be emitted. Force a one-time resync.
@@ -1831,10 +2115,15 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
     # For "selected" mode with sync_all_generated=False, pre-fetch which generated shelves
     # the user has marked for Kobo sync.
     user_enabled_generated_shelves = None
+    user_enabled_generated_shelves_modified = {}
     if kobo_collections_mode == "selected" and not sync_all_generated:
         try:
             enabled_rows = (
-                ub.session.query(ub.GeneratedShelfKoboSync.source, ub.GeneratedShelfKoboSync.value)
+                ub.session.query(
+                    ub.GeneratedShelfKoboSync.source,
+                    ub.GeneratedShelfKoboSync.value,
+                    ub.GeneratedShelfKoboSync.last_modified,
+                )
                 .filter(
                     ub.GeneratedShelfKoboSync.user_id == current_user.id,
                     ub.GeneratedShelfKoboSync.kobo_sync == True,
@@ -1842,6 +2131,10 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
                 .all()
             )
             user_enabled_generated_shelves = {(row.source, row.value) for row in enabled_rows}
+            user_enabled_generated_shelves_modified = {
+                (row.source, row.value): _to_naive_datetime(getattr(row, "last_modified", None))
+                for row in enabled_rows
+            }
             log.debug(
                 "Kobo generated shelves: user has %s shelves enabled for sync",
                 len(user_enabled_generated_shelves),
@@ -1849,6 +2142,7 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
         except Exception as e:
             log.debug("Kobo generated shelves: failed to fetch user preferences: %s", e)
             user_enabled_generated_shelves = set()
+            user_enabled_generated_shelves_modified = {}
 
     emitted = 0
     emitted_items = 0
@@ -1857,6 +2151,12 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
         if user_enabled_generated_shelves is not None:
             if (gen_shelf.source, gen_shelf.value) not in user_enabled_generated_shelves:
                 continue
+
+        pref_last_modified = None
+        try:
+            pref_last_modified = user_enabled_generated_shelves_modified.get((gen_shelf.source, gen_shelf.value))
+        except Exception:
+            pref_last_modified = None
 
         shelf_filter = generated_shelf_filter(gen_shelf.source, gen_shelf.value)
         if shelf_filter is None:
@@ -1875,10 +2175,18 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
             max_modified = max_modified_query.scalar()
             max_modified = _to_naive_datetime(max_modified)
             if not max_modified:
-                continue
-            effective_modified = max_modified
+                # No eligible books (or no timestamps). If empty collections are allowed, still emit
+                # using a preference/trigger timestamp so newly-enabled shelves can be created.
+                if allow_empty_collections and (pref_last_modified or trigger_ts):
+                    effective_modified = pref_last_modified or trigger_ts
+                else:
+                    continue
+            else:
+                effective_modified = max_modified
             if trigger_ts is not None:
                 effective_modified = max(effective_modified, trigger_ts)
+            if pref_last_modified is not None:
+                effective_modified = max(effective_modified, pref_last_modified)
             if effective_modified <= effective_last_sync:
                 continue
 
@@ -1894,20 +2202,23 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
         book_uuids = [row[0] for row in book_uuid_rows if row and row[0]]
 
         if not book_uuids:
-            # Generated shelf exists but has no eligible books; ensure collection is removed.
-            delete_ts = datetime.now(timezone.utc)
-            tag_id = getattr(gen_shelf, "uuid", None)
-            if tag_id:
-                sync_results.append({
-                    "DeletedTag": {
-                        "Tag": {
-                            "Id": tag_id,
-                            "LastModified": convert_to_kobo_timestamp_string(delete_ts),
+            # Generated shelf exists but has no eligible books
+            if not allow_empty_collections:
+                # Ensure collection is removed
+                delete_ts = datetime.now(timezone.utc)
+                tag_id = getattr(gen_shelf, "uuid", None)
+                if tag_id:
+                    sync_results.append({
+                        "DeletedTag": {
+                            "Tag": {
+                                "Id": tag_id,
+                                "LastModified": convert_to_kobo_timestamp_string(delete_ts),
+                            }
                         }
-                    }
-                })
-                new_tags_last_modified = max(_to_naive_datetime(delete_ts), new_tags_last_modified)
-            continue
+                    })
+                    new_tags_last_modified = max(_to_naive_datetime(delete_ts), new_tags_last_modified)
+                continue
+            # else: allow_empty_collections is True, fall through to create the empty tag
 
         tag = create_kobo_tag_generated(gen_shelf, book_uuids, effective_modified, effective_modified)
         if not tag:
@@ -1932,10 +2243,19 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
     except Exception:
         pass
 
-    # If filtering by user preferences, delete collections for generated shelves that are NOT enabled
-    if user_enabled_generated_shelves is not None and len(user_enabled_generated_shelves) < len(shelves):
+    # If filtering by user preferences, delete collections for generated shelves that are NOT enabled.
+    # Note: when eligible_book_ids is used, `shelves` may be filtered to only those with eligible books.
+    # We still need to delete disabled shelves that may linger on the device from earlier syncs.
+    if user_enabled_generated_shelves is not None:
+        delete_candidates = shelves
+        try:
+            if eligible_book_ids is not None:
+                delete_candidates = list_generated_shelves()
+        except Exception:
+            delete_candidates = shelves
+
         delete_ts = datetime.now(timezone.utc)
-        for gen_shelf in shelves:
+        for gen_shelf in delete_candidates or []:
             if (gen_shelf.source, gen_shelf.value) in user_enabled_generated_shelves:
                 continue  # This one is enabled, don't delete
             tag_id = getattr(gen_shelf, "uuid", None)
@@ -1963,7 +2283,7 @@ def sync_generated_shelves(sync_token, sync_results, new_tags_last_modified, kob
 
 
 # Creates a Kobo "Tag" object from an ub.Shelf object
-def create_kobo_tag(shelf, allowed_book_ids=None):
+def create_kobo_tag(shelf, allowed_book_ids=None, allow_empty=False):
     tag = {
         "Created": convert_to_kobo_timestamp_string(shelf.created),
         "Id": shelf.uuid,
@@ -1985,7 +2305,7 @@ def create_kobo_tag(shelf, allowed_book_ids=None):
                 "Type": "ProductRevisionTagItem"
             }
         )
-    if allowed_book_ids is not None and not tag["Items"]:
+    if allowed_book_ids is not None and not tag["Items"] and not allow_empty:
         return None
     return {"Tag": tag}
 
@@ -2217,8 +2537,8 @@ def HandleCoverImageRequest(book_uuid, version, width, height, Quality, isGreysc
         # In hybrid mode, cover requests are a good signal that the device still has/cares about a local book.
         # If it's not opted-in, track it so the next sync can archive/remove it.
         try:
-            kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-            if kobo_collections_mode == "hybrid" and _effective_only_kobo_shelves_sync():
+            kobo_collections_mode = get_user_kobo_collections_mode(current_user)
+            if kobo_collections_mode == "hybrid" and _effective_only_kobo_shelves_sync(current_user):
                 book = calibre_db.get_book_by_uuid(book_uuid)
                 if book:
                     opt_in_shelf = _ensure_kobo_opt_in_shelf(current_user.id, "Kobo Sync")
@@ -2289,7 +2609,7 @@ def HandleBookDeletionRequest(book_uuid):
 
     book_id = book.id
 
-    if not _effective_only_kobo_shelves_sync() and current_user.check_visibility(32768):
+    if not _effective_only_kobo_shelves_sync(current_user) and current_user.check_visibility(32768):
         kobo_sync_status.change_archived_books(book_id, True)
 
     is_archived = kobo_sync_status.change_archived_books(book_id, True)
@@ -2528,8 +2848,8 @@ def download_book(book_id, book_format):
     # In hybrid mode, a download request for a non-opt-in book indicates the device is trying to keep/restore it.
     # Track it so the next sync can archive/remove it if needed.
     try:
-        kobo_collections_mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-        if kobo_collections_mode == "hybrid" and _effective_only_kobo_shelves_sync():
+        kobo_collections_mode = get_user_kobo_collections_mode(current_user)
+        if kobo_collections_mode == "hybrid" and _effective_only_kobo_shelves_sync(current_user):
             try:
                 calibre_book_id = int(book_id)
             except Exception:
