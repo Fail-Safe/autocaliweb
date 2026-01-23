@@ -1,0 +1,2 @@
+# Kobo Device Simulator dependencies
+requests>=2.28.0
