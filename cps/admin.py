@@ -27,6 +27,7 @@ import operator
 import time
 import sys
 import string
+import sqlite3
 from datetime import datetime, timedelta
 from datetime import time as datetime_time
 from functools import wraps
@@ -86,6 +87,64 @@ except ImportError as err:
     oauth_check = {}
 
 admi = Blueprint('admin', __name__)
+
+
+def _inspect_calibre_metadata_db(calibre_dir: str | None) -> dict:
+    """Inspect the Calibre metadata.db for common container mount pitfalls.
+
+    Primarily detects SQLite WAL mode without the corresponding sidecar files
+    (metadata.db-wal / metadata.db-shm), which can lead to apparently missing
+    books/authors when only metadata.db is mounted.
+    """
+    result: dict = {
+        "calibre_dir": calibre_dir,
+        "metadata_db": None,
+        "exists": False,
+        "sqlite_journal_mode": None,
+        "wal_exists": False,
+        "shm_exists": False,
+        "warning": None,
+        "error": None,
+    }
+
+    if not calibre_dir:
+        return result
+
+    # If the user entered a file path, point them at the directory.
+    if str(calibre_dir).lower().endswith("metadata.db"):
+        result["warning"] = _("Please set the Calibre database location to the directory containing metadata.db, not the metadata.db file itself.")
+        calibre_dir = os.path.dirname(calibre_dir)
+
+    metadata_db = os.path.join(calibre_dir, "metadata.db")
+    result["metadata_db"] = metadata_db
+    result["exists"] = os.path.exists(metadata_db)
+    if not result["exists"]:
+        return result
+
+    wal_path = metadata_db + "-wal"
+    shm_path = metadata_db + "-shm"
+    result["wal_exists"] = os.path.exists(wal_path)
+    result["shm_exists"] = os.path.exists(shm_path)
+
+    try:
+        conn = sqlite3.connect(f"file:{metadata_db}?mode=ro", uri=True)
+        cur = conn.cursor()
+        cur.execute("PRAGMA journal_mode")
+        row = cur.fetchone()
+        result["sqlite_journal_mode"] = (row[0] if row else None)
+        conn.close()
+    except Exception as ex:
+        result["error"] = str(ex)
+        return result
+
+    if (result["sqlite_journal_mode"] or "").lower() == "wal" and not (result["wal_exists"] and result["shm_exists"]):
+        result["warning"] = _(
+            "Your Calibre database appears to be using SQLite WAL mode, but metadata.db-wal and/or metadata.db-shm are missing. "
+            "If you bind-mount only metadata.db into the container, Autocaliweb may show stale or incomplete data. "
+            "Mount the whole Calibre library directory (recommended), or also mount metadata.db-wal and metadata.db-shm."
+        )
+
+    return result
 
 
 def admin_required(f):
@@ -1631,6 +1690,133 @@ def download_debug():
     return debug_info.send_debug()
 
 
+@admi.route("/admin/calibre_audit", methods=["GET"])
+@user_login_required
+@admin_required
+def calibre_audit():
+    """Return diagnostic information about the connected Calibre DB.
+
+    This is meant to help troubleshoot cases where the UI shows fewer books/authors than expected.
+    Differences are usually caused by user filters (language/tags/restricted column) or archived books.
+    """
+
+    db_dir = getattr(config, "config_calibre_dir", None)
+    metadata_db_path = os.path.join(db_dir, "metadata.db") if db_dir else ""
+
+    payload = {
+        "config_calibre_dir": db_dir,
+        "metadata_db_path": metadata_db_path,
+        "metadata_db_exists": bool(metadata_db_path and os.path.exists(metadata_db_path)),
+        "metadata_db_stat": None,
+        "raw": {},
+        "acw_visible": {},
+        "filters": {
+            "language": None,
+            "allowed_tags": None,
+            "denied_tags": None,
+            "restricted_column": getattr(config, "config_restricted_column", None),
+            "allowed_column_value": getattr(current_user, "allowed_column_value", None),
+            "denied_column_value": getattr(current_user, "denied_column_value", None),
+            "archived_books_count": 0,
+        },
+    }
+
+    try:
+        payload["filters"]["language"] = current_user.filter_language()
+        payload["filters"]["allowed_tags"] = current_user.list_allowed_tags()
+        payload["filters"]["denied_tags"] = current_user.list_denied_tags()
+        payload["filters"]["archived_books_count"] = (
+            ub.session.query(ub.ArchivedBook)
+            .filter(ub.ArchivedBook.user_id == int(current_user.id))
+            .filter(ub.ArchivedBook.is_archived)
+            .count()
+        )
+    except Exception as ex:
+        payload["filters"]["error"] = f"Failed to read filter settings: {ex}"
+
+    if metadata_db_path and os.path.exists(metadata_db_path):
+        try:
+            st = os.stat(metadata_db_path)
+            payload["metadata_db_stat"] = {
+                "size_bytes": int(st.st_size),
+                "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(),
+            }
+        except Exception as ex:
+            payload["metadata_db_stat"] = {"error": str(ex)}
+
+        # SQLite sidecar files (important for WAL mode).
+        wal_path = metadata_db_path + "-wal"
+        shm_path = metadata_db_path + "-shm"
+        payload["metadata_db_sidecars"] = {
+            "wal_path": wal_path,
+            "wal_exists": os.path.exists(wal_path),
+            "shm_path": shm_path,
+            "shm_exists": os.path.exists(shm_path),
+        }
+        for key, p in (("wal_stat", wal_path), ("shm_stat", shm_path)):
+            if os.path.exists(p):
+                try:
+                    st2 = os.stat(p)
+                    payload["metadata_db_sidecars"][key] = {
+                        "size_bytes": int(st2.st_size),
+                        "mtime": datetime.fromtimestamp(st2.st_mtime).isoformat(),
+                    }
+                except Exception as ex:
+                    payload["metadata_db_sidecars"][key] = {"error": str(ex)}
+
+        # Raw SQLite counts directly from calibre metadata.db (no ACW filtering).
+        try:
+            conn = sqlite3.connect(f"file:{metadata_db_path}?mode=ro", uri=True)
+            cur = conn.cursor()
+            try:
+                cur.execute("PRAGMA journal_mode")
+                row = cur.fetchone()
+                payload["raw"]["sqlite_journal_mode"] = row[0] if row else None
+            except Exception:
+                payload["raw"]["sqlite_journal_mode"] = None
+            cur.execute("SELECT COUNT(*) FROM books")
+            payload["raw"]["books_total"] = int(cur.fetchone()[0])
+            cur.execute("SELECT COUNT(*) FROM books WHERE title IS NULL OR TRIM(title) = ''")
+            payload["raw"]["books_missing_title"] = int(cur.fetchone()[0])
+            cur.execute("SELECT COUNT(*) FROM authors")
+            payload["raw"]["authors_total"] = int(cur.fetchone()[0])
+            cur.execute("SELECT COUNT(*) FROM authors WHERE name IS NULL OR TRIM(name) = ''")
+            payload["raw"]["authors_missing_name"] = int(cur.fetchone()[0])
+            cur.execute("SELECT COUNT(*) FROM books_authors_link")
+            payload["raw"]["books_authors_links"] = int(cur.fetchone()[0])
+            cur.execute(
+                "SELECT COUNT(*) FROM books b "
+                "LEFT JOIN books_authors_link bal ON bal.book = b.id "
+                "WHERE bal.author IS NULL"
+            )
+            payload["raw"]["books_without_authors"] = int(cur.fetchone()[0])
+            conn.close()
+        except Exception as ex:
+            payload["raw"]["error"] = f"Failed to query metadata.db: {ex}"
+
+    # Counts as ACW would display them for the current user (applies common_filters).
+    try:
+        visible_books = (
+            calibre_db.session.query(db.Books.id)
+            .filter(calibre_db.common_filters())
+            .count()
+        )
+        visible_authors = (
+            calibre_db.session.query(db.Authors.id)
+            .select_from(db.Authors)
+            .join(db.Authors.books)
+            .filter(calibre_db.common_filters())
+            .distinct()
+            .count()
+        )
+        payload["acw_visible"]["books_total"] = int(visible_books)
+        payload["acw_visible"]["authors_total"] = int(visible_authors)
+    except Exception as ex:
+        payload["acw_visible"]["error"] = f"Failed to query via ACW models: {ex}"
+
+    return Response(json.dumps(payload, indent=2), mimetype="application/json")
+
+
 @admi.route("/get_update_status", methods=['GET'])
 @user_login_required
 @admin_required
@@ -2043,8 +2229,11 @@ def _db_configuration_result(error_flash=None, gdrive_error=None):
     elif request.method == "POST" and not gdrive_error:
         flash(_("Database Settings updated"), category="success")
 
+    calibre_db_inspection = _inspect_calibre_metadata_db(getattr(config, "config_calibre_dir", None))
+
     return render_title_template("config_db.html",
                                  config=config,
+                                 calibre_db_inspection=calibre_db_inspection,
                                  show_authenticate_google_drive=gdrive_authenticate,
                                  gdriveError=gdrive_error,
                                  gdrivefolders=gdrivefolders,

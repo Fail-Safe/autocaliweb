@@ -1127,6 +1127,7 @@ def create_edit_shelf(shelf, page_title, page, shelf_id=False):
     # Show Kobo sync toggle when mode is 'selected' or 'hybrid' (not 'all')
     kobo_mode = get_user_kobo_collections_mode(current_user)
     sync_only_selected_shelves = kobo_mode in ("selected", "hybrid")
+    is_kobo_opt_in_shelf = getattr(shelf, "name", None) == KOBO_OPT_IN_SHELF_NAME
     # calibre_db.session.query(ub.Shelf).filter(ub.Shelf.user_id == current_user.id).filter(ub.Shelf.kobo_sync).count()
     if request.method == "POST":
         to_save = request.form.to_dict()
@@ -1136,7 +1137,7 @@ def create_edit_shelf(shelf, page_title, page, shelf_id=False):
         is_public = 1 if to_save.get("is_public") == "on" else 0
 
         shelf_title = to_save.get("title", "")
-        reserved_opt_in_name = "Kobo Sync"
+        reserved_opt_in_name = KOBO_OPT_IN_SHELF_NAME
         is_reserved_opt_in_shelf = False
         try:
             is_reserved_opt_in_shelf = (shelf.name == reserved_opt_in_name) or (shelf_title.strip() == reserved_opt_in_name)
@@ -1148,6 +1149,7 @@ def create_edit_shelf(shelf, page_title, page, shelf_id=False):
             shelf_title = reserved_opt_in_name
             is_public = 0
             shelf.kobo_sync = False
+            is_kobo_opt_in_shelf = True
         elif config.config_kobo_sync:
             shelf.kobo_sync = True if to_save.get("kobo_sync") else False
             if shelf.kobo_sync:
@@ -1182,6 +1184,7 @@ def create_edit_shelf(shelf, page_title, page, shelf_id=False):
                 flash(_("There was an error"), category="error")
     return render_title_template('shelf_edit.html',
                                  shelf=shelf,
+                                 is_kobo_opt_in_shelf=is_kobo_opt_in_shelf,
                                  title=page_title,
                                  page=page,
                                  kobo_sync_enabled=config.config_kobo_sync,
