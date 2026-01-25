@@ -19,7 +19,7 @@
 import os
 import re
 import glob
-from shutil import copyfile, copyfileobj
+from shutil import copyfile
 from markupsafe import escape
 from time import time
 from uuid import uuid4
@@ -193,8 +193,15 @@ class TaskConvert(CalibreTask):
                             local_db.session.commit()
                             if self.settings['new_book_format'].upper() in ['KEPUB', 'EPUB', 'EPUB3']:
                                 ub_session = init_db_thread()
-                                remove_synced_book(book_id, True, ub_session)
-                                ub_session.close()
+                                try:
+                                    remove_synced_book(
+                                        book_id,
+                                        session=ub_session,
+                                        user_id=self.user,
+                                        reason="format-convert",
+                                    )
+                                finally:
+                                    ub_session.close()
                         except SQLAlchemyError as e:
                             local_db.session.rollback()
                             log.error("Database error: %s", e)
