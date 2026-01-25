@@ -59,8 +59,20 @@ import os
 import sys
 INSTALL_BASE_DIR = os.environ.get("ACW_INSTALL_DIR", "/app/autocaliweb")
 SCRIPTS_PATH = os.path.join(INSTALL_BASE_DIR, "scripts")
-sys.path.insert(1, SCRIPTS_PATH)
-from acw_db import ACW_DB
+REPO_SCRIPTS_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
+)
+for _p in (SCRIPTS_PATH, REPO_SCRIPTS_PATH):
+    try:
+        if _p and _p not in sys.path:
+            sys.path.insert(1, _p)
+    except Exception:
+        pass
+
+try:
+    from acw_db import ACW_DB
+except Exception:
+    ACW_DB = None
 
 
 log = logger.create()
@@ -378,6 +390,8 @@ def get_acw_last_notification() -> str:
 # Displays a notification to the user that an update for CWA is available, no matter which page they're on
 # Currently set to only display once per calender day
 def acw_update_notification() -> None:
+    if ACW_DB is None:
+        return
     db = ACW_DB()
     if db.acw_settings['acw_update_notifications']:
         current_date = datetime.now().strftime("%Y-%m-%d")
