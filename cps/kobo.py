@@ -27,6 +27,7 @@ import time
 import json
 import threading
 from urllib.parse import unquote
+from typing import Any, cast
 
 from flask import (
     Blueprint,
@@ -45,6 +46,10 @@ from sqlalchemy import func, literal
 from sqlalchemy.sql.expression import and_, or_
 from sqlalchemy.exc import StatementError
 import requests
+try:
+    from urllib3.util.retry import Retry
+except Exception:  # pragma: no cover
+    Retry = None
 
 from . import config, logger, kobo_auth, db, calibre_db, helper, shelf as shelf_lib, ub, csrf, kobo_sync_status
 from . import isoLanguages
@@ -193,6 +198,39 @@ _kobo_store_session = None
 _kobo_store_session_lock = threading.Lock()
 
 
+def _build_kobo_store_retry():
+    if Retry is None:
+        return 1
+
+    allowed = frozenset(["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS"])
+    try:
+        return Retry(
+            total=3,
+            connect=3,
+            read=3,
+            status=3,
+            backoff_factor=0.5,
+            status_forcelist=(500, 502, 503, 504),
+            raise_on_status=False,
+            respect_retry_after_header=True,
+            allowed_methods=allowed,
+        )
+    except TypeError:
+        # urllib3 < 1.26
+        retry_cls = cast(Any, Retry)
+        return retry_cls(
+            total=3,
+            connect=3,
+            read=3,
+            status=3,
+            backoff_factor=0.5,
+            status_forcelist=(500, 502, 503, 504),
+            raise_on_status=False,
+            respect_retry_after_header=True,
+            method_whitelist=allowed,
+        )
+
+
 def _get_kobo_store_session():
     """Get or create a reusable requests session for Kobo store API calls."""
     global _kobo_store_session
@@ -204,10 +242,32 @@ def _get_kobo_store_session():
                 adapter = requests.adapters.HTTPAdapter(
                     pool_connections=5,
                     pool_maxsize=10,
-                    max_retries=1
+                    max_retries=_build_kobo_store_retry(),
                 )
                 _kobo_store_session.mount("https://", adapter)
     return _kobo_store_session
+
+
+_kobo_last_calibre_reconnect_mono = None
+
+
+def _maybe_reconnect_calibre_db(*, force=False, min_interval_seconds=15):
+    """Reconnect calibre DB sparingly.
+
+    Kobo sync can take many round-trips; reconnecting on every request is expensive.
+    We reconnect at most once per short window, and optionally force reconnect.
+    """
+    global _kobo_last_calibre_reconnect_mono
+    now = time.monotonic()
+    try:
+        last = _kobo_last_calibre_reconnect_mono
+        should = force or last is None or (now - last) >= float(min_interval_seconds)
+        if not should:
+            return
+        calibre_db.reconnect_db(config, ub.app_DB_path)
+        _kobo_last_calibre_reconnect_mono = now
+    except Exception as e:
+        log.debug("Kobo: calibre_db.reconnect_db failed: %s", e)
 
 
 kobo = Blueprint("kobo", __name__, url_prefix="/kobo/<auth_token>")
@@ -440,8 +500,15 @@ def HandleSyncRequest():
     sync_results = []
 
     # We reload the book database so that the user gets a fresh view of the library
-    # in case of external changes (e.g: adding a book through Calibre).
-    calibre_db.reconnect_db(config, ub.app_DB_path)
+    # in case of external changes (e.g: adding a book through Calibre). Kobo sync can
+    # involve many round-trips, so reconnect sparingly.
+    force_reconnect = (
+        sync_token.books_last_modified == datetime.min
+        or sync_token.books_last_created == datetime.min
+        or sync_token.reading_state_last_modified == datetime.min
+        or sync_token.tags_last_modified == datetime.min
+    )
+    _maybe_reconnect_calibre_db(force=force_reconnect)
     # Do not trigger a full-library thumbnail generation pass during Kobo sync.
     # That job can be CPU-heavy (ImageMagick/Wand) and makes the device appear stuck
     # on "Downloading book covers" while requests slow down.
@@ -956,7 +1023,7 @@ def HandleSyncRequest():
 
 def generate_sync_response(sync_token, sync_results, set_cont=False):
     extra_headers = {}
-    if config.config_kobo_proxy and not set_cont:
+    if config.config_kobo_proxy and not set_cont and not getattr(config, "config_kobo_disable_store_sync_merge", False):
         # Merge in sync results from the official Kobo store.
         try:
             store_response = make_request_to_kobo_store(sync_token)
@@ -2630,35 +2697,65 @@ def HandleUnimplementedRequest(dummy=None):
 # TODO: Implement the following routes
 @csrf.exempt
 @kobo.route("/v1/user/loyalty/<dummy>", methods=["GET", "POST"])
+def HandleLoyaltyRequest(dummy=None):
+    log.debug("Loyalty request received, returning empty response")
+    return make_response(jsonify({}))
+
+
+@csrf.exempt
 @kobo.route("/v1/user/profile", methods=["GET", "POST"])
+def HandleUserProfileRequest():
+    log.debug("User profile request received, returning empty response")
+    return make_response(jsonify({}))
+
+
+@csrf.exempt
 @kobo.route("/v1/user/wishlist", methods=["GET", "POST"])
+def HandleWishlistRequest():
+    log.debug("Wishlist request received, returning empty response")
+    return make_response(jsonify({"Items": [], "TotalCount": 0}))
+
+
+@csrf.exempt
 @kobo.route("/v1/user/recommendations", methods=["GET", "POST"])
+def HandleRecommendationsRequest():
+    log.debug("Recommendations request received, returning empty response")
+    return make_response(jsonify({"Items": [], "TotalCount": 0}))
+
+
+@csrf.exempt
 @kobo.route("/v1/analytics/<dummy>", methods=["GET", "POST"])
+def HandleAnalyticsRequest(dummy=None):
+    log.debug("Analytics request received, returning empty response (not proxied)")
+    return make_response(jsonify({}))
+
+
+@csrf.exempt
 @kobo.route("/v1/assets", methods=["GET"])
+def HandleAssetsRequest():
+    log.debug("Assets request received, returning empty response")
+    return make_response(jsonify([]))
+
+
+@csrf.exempt
 @kobo.route("/v2/user/tasteprofile/genre", methods=["GET", "POST"])
 @kobo.route("/v2/user/tasteprofile/complete", methods=["GET", "POST"])
-def HandleUserRequest(dummy=None):
-    log.debug("Unimplemented User Request received: %s (%s)", request.base_url, "forwarded to Kobo Store" if config.config_kobo_proxy else "returning empty response")
-    return redirect_or_proxy_request()
+def HandleTasteProfileRequest():
+    log.debug("Taste profile request received, returning empty response")
+    return make_response(jsonify({}))
 
 
 @csrf.exempt
 @kobo.route("/v1/user/loyalty/benefits", methods=["GET"])
 def handle_benefits():
-    if config.config_kobo_proxy:
-        return redirect_or_proxy_request()
-    else:
-        return make_response(jsonify({"Benefits": {}}))
+    return make_response(jsonify({"Benefits": {}}))
 
 
 @csrf.exempt
 @kobo.route("/v1/analytics/gettests", methods=["GET", "POST"])
 def handle_getests():
-    if config.config_kobo_proxy:
-        return redirect_or_proxy_request()
-    else:
-        testkey = request.headers.get("X-Kobo-userkey", "")
-        return make_response(jsonify({"Result": "Success", "TestKey": testkey, "Tests": {}}))
+    testkey = request.headers.get("X-Kobo-userkey", "")
+    return make_response(jsonify({"Result": "Success", "TestKey": testkey, "Tests": {}}))
 
 
 @csrf.exempt

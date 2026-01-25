@@ -145,6 +145,9 @@ class _Settings(_Base):
     config_oauth_auto_redirect = Column(Boolean, default=False)
 
     config_kobo_proxy = Column(Boolean, default=False)
+    # When True, do not call Kobo Store /v1/library/sync to merge store results into the local sync response.
+    # Useful for fully-offline/self-hosted setups.
+    config_kobo_disable_store_sync_merge = Column(Boolean, default=False)
 
     config_ldap_provider_url = Column(String, default='example.org')
     config_ldap_port = Column(SmallInteger, default=389)
