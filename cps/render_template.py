@@ -28,7 +28,6 @@ from .cw_login import current_user
 from .generated_shelves import list_generated_shelves
 from .ub import User
 
-
 def _get_user_kobo_collections_mode(user=None):
     """Get the Kobo collections sync mode for a user.
 
@@ -60,31 +59,6 @@ def _get_user_kobo_collections_mode(user=None):
                 .strip()
                 .lower()
             )
-    except Exception:
-        mode = "selected"
-    if mode not in ("all", "selected", "hybrid"):
-        mode = "selected"
-    return mode
-
-
-
-def _get_user_kobo_collections_mode(user=None):
-    """Get the Kobo collections sync mode for a user.
-
-    Returns: 'all', 'selected', or 'hybrid'
-    Priority: user setting > global config > default ('selected').
-    Note: Duplicated here to avoid circular imports from shelf module.
-    """
-    mode = "selected"
-    try:
-        if user is not None:
-            user_mode = getattr(user, "kobo_sync_collections_mode", None)
-            if user_mode:
-                mode = user_mode.strip().lower()
-            else:
-                mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
-        else:
-            mode = (getattr(config, "config_kobo_sync_collections_mode", "selected") or "selected").strip().lower()
     except Exception:
         mode = "selected"
     if mode not in ("all", "selected", "hybrid"):
@@ -382,7 +356,9 @@ def get_sidebar_config(kwargs=None):
             shelf_name = "Kobo Sync"
             shelf = (
                 ub.session.query(ub.Shelf)
-                .filter(ub.Shelf.user_id == current_user.id, ub.Shelf.name == shelf_name)
+                .filter(
+                    ub.Shelf.user_id == current_user.id, ub.Shelf.name == shelf_name
+                )
                 .first()
             )
             if not shelf:
