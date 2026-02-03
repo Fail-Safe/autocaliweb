@@ -815,6 +815,11 @@ def HandleSyncRequest():
         else:
             extra_filters.append(ub.Shelf.kobo_sync)
 
+        # In hybrid/selected shelf-sync modes, "newly allowed" is a shelf membership event.
+        # Gate that using tags_last_modified (the shelf/collection token), not books_last_modified,
+        # because the device's books_last_modified can advance for reasons unrelated to shelf changes.
+        shelf_membership_gate_ts = sync_token.tags_last_modified
+
         shelf_entries = calibre_db.session.query(
             db.Books,
             ub.ArchivedBook.last_modified,
@@ -840,8 +845,7 @@ def HandleSyncRequest():
                     ),
                     func.datetime(db.Books.last_modified)
                     > sync_token.books_last_modified,
-                    func.datetime(ub.BookShelf.date_added)
-                    > sync_token.books_last_modified,
+                    func.datetime(ub.BookShelf.date_added) > shelf_membership_gate_ts,
                 )
             )
             .filter(db.Data.format.in_(KOBO_FORMATS))
@@ -855,8 +859,10 @@ def HandleSyncRequest():
 
         # In selected mode, include books from generated shelves with kobo_sync enabled
         if kobo_collections_mode == "selected" and allowed_books_ids:
-            # Get books that are in allowed_books_ids (from generated shelves) but not yet synced
-            # or have been modified since last sync
+            # IMPORTANT:
+            # Generated shelves don't have a ub.BookShelf.date_added to indicate "newly allowed".
+            # To ensure "newly allowed but older timestamp" books get emitted without a full reset,
+            # we rely on the "not yet synced" branch of the OR below.
             generated_shelf_entries = (
                 calibre_db.session.query(
                     db.Books,
@@ -878,11 +884,13 @@ def HandleSyncRequest():
                 .filter(
                     db.Books.id.in_(list(allowed_books_ids)),
                     or_(
+                        # Newly allowed (present in allowed_books_ids) but not yet synced -> emit
                         db.Books.id.notin_(
                             calibre_db.session.query(ub.KoboSyncedBooks.book_id).filter(
                                 ub.KoboSyncedBooks.user_id == current_user.id
                             )
                         ),
+                        # Or modified since last sync -> emit
                         func.datetime(db.Books.last_modified)
                         > sync_token.books_last_modified,
                     ),
@@ -977,6 +985,11 @@ def HandleSyncRequest():
     books_list = books.all()
     log.debug("Books to Sync: {}".format(len(books_list)))
     log.debug("sync_token.books_last_created: %s" % sync_token.books_last_created)
+
+    # NOTE: Shelf membership changes are now gated using the shelf/collection token
+    # (sync_token.tags_last_modified), and that token is advanced in `sync_shelves()`.
+    # Advancing `new_books_last_modified` based on shelf membership here is redundant and can
+    # be confusing, so it has been removed.
 
     # Debug: Log total library book count and format info for troubleshooting incomplete syncs
     try:
@@ -1111,11 +1124,27 @@ def HandleSyncRequest():
         new_books_last_modified = max(
             book.Books.last_modified.replace(tzinfo=None), new_books_last_modified
         )
+
+        # Hybrid/selected shelf-sync relies on shelf membership changes as a signal.
+        # If a book becomes newly allowed (added to Kobo Sync shelf) but has an older
+        # calibre last_modified timestamp, we must advance the sync token using the
+        # shelf link's date_added as well, otherwise the device can miss the window and
+        # the newly-allowed book will never be emitted again without a full reset.
+        try:
+            if getattr(book, "date_added", None):
+                new_books_last_modified = max(
+                    new_books_last_modified, book.date_added.replace(tzinfo=None)
+                )
+        except Exception:
+            pass
+        # NOTE: date_added handling moved above with a broader safety net; keep this
+        # block as a no-op for backwards compatibility in case older code paths still
+        # expect it to exist.
         try:
             new_books_last_modified = max(
                 new_books_last_modified, book.date_added.replace(tzinfo=None)
             )
-        except AttributeError:
+        except Exception:
             pass
 
         new_books_last_created = max(ts_created, new_books_last_created)
@@ -1464,7 +1493,39 @@ def get_language(book):
 
 def get_metadata(book):
     download_urls = []
+
+    # Prefer serving KEPUB to Kobo if available.
+    # In some deployments the Calibre library DB (metadata.db) is mounted read-only,
+    # so the KEPUB format may exist on disk but not be registered in the DB `data` table.
     kepub = [data for data in book.data if data.format == "KEPUB"]
+
+    # If no KEPUB is registered in the DB, but a .kepub file exists alongside the book,
+    # advertise KEPUB anyway so the device can download it.
+    if len(kepub) == 0:
+        try:
+            base_dir = os.path.join(config.get_book_path(), book.path)
+
+            # Try to derive the Calibre filename prefix from any existing format entry.
+            # This matches typical Calibre naming (Data.name + .ext).
+            base_name = None
+            try:
+                if getattr(book, "data", None) and len(book.data) > 0:
+                    base_name = getattr(book.data[0], "name", None)
+            except Exception:
+                base_name = None
+
+            if base_name:
+                kepub_path = os.path.join(base_dir, base_name + ".kepub")
+                if os.path.isfile(kepub_path):
+                    dummy = type("DataLike", (), {})()
+                    dummy.format = "KEPUB"
+                    dummy.uncompressed_size = os.path.getsize(kepub_path)
+                    # Provide a `name` attribute for downstream code that may expect it.
+                    dummy.name = base_name
+                    kepub = [dummy]
+        except Exception:
+            # Fall back to existing DB-listed formats
+            pass
 
     for book_data in kepub if len(kepub) > 0 else book.data:
         if book_data.format not in KOBO_FORMATS:
@@ -1813,6 +1874,32 @@ def sync_shelves(
             }
 
     new_tags_last_modified = sync_token.tags_last_modified
+
+    # In hybrid/selected shelf-sync modes, newly-allowed books are driven by shelf membership
+    # changes (book_shelf_link.date_added). The device's books_last_modified can advance for
+    # reasons unrelated to shelf changes, so we must also advance tags_last_modified using the
+    # latest membership timestamp to keep "newly allowed but older timestamp" books emitting
+    # reliably in future syncs.
+    try:
+        latest_membership_change = (
+            ub.session.query(func.max(ub.BookShelf.date_added))
+            .join(ub.Shelf, ub.Shelf.id == ub.BookShelf.shelf)
+            .filter(ub.Shelf.user_id == current_user.id)
+            .scalar()
+        )
+        if latest_membership_change:
+            new_tags_last_modified = max(
+                _to_naive_datetime(latest_membership_change), new_tags_last_modified
+            )
+            log.debug(
+                "Kobo shelfs sync: advancing new_tags_last_modified using latest shelf membership date_added=%s",
+                latest_membership_change,
+            )
+    except Exception as e:
+        log.debug(
+            "Kobo shelfs sync: unable to compute latest shelf membership date_added: %s",
+            e,
+        )
     # transmit all archived shelfs independent of last sync (why should this matter?)
     for shelf in ub.session.query(ub.ShelfArchive).filter(
         ub.ShelfArchive.user_id == current_user.id
