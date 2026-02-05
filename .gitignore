@@ -22,12 +22,27 @@ vendor/
 *.egg
 .pylint.d
 
+# Local virtualenvs (including uv lock helper venvs)
+.venv/
+.uv-venv/
+.uv-lock-venv*/
+.uv-lock-venv*/
+.uv-lock-venv313/
+.uv-lock-venv312/
+.uv-lock-venv313*/
+.uv-lock-venv312*/
+
+# uv transient state
+.uv/
+.uv-cache/
+
 # autocaliweb
 *.db
 *.log
 cps/cache
 
 .idea/
+.vscode/
 *.bak
 *.log.*
 .key
@@ -37,6 +52,16 @@ gdrive_credentials
 client_secrets.json
 gmail.json
 /.key
+
+# Development-specific files
+dev-run.sh
+docker-compose.dev.yml
+nginx/
+
+### Node lock files ###
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 ### Node / ESLint ###
 node_modules/
 npm-debug.log*

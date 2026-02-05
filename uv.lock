@@ -112,6 +112,7 @@ dependencies = [
     { name = "python-slugify" },
     { name = "pytz" },
     { name = "qrcode" },
+    { name = "rauth" },
     { name = "regex" },
     { name = "requests" },
     { name = "sqlalchemy" },
@@ -184,14 +185,14 @@ requires-dist = [
     { name = "comicapi", marker = "extra == 'comics'", specifier = ">=2.2.0,<3.3.0" },
     { name = "cryptography", specifier = ">=43.0.4,<45.0.0" },
     { name = "faust-cchardet", marker = "extra == 'metadata'", specifier = ">=2.1.18,<2.1.20" },
-    { name = "flask", specifier = ">=1.0.2,<3.2.0" },
-    { name = "flask-babel", specifier = ">=3.0.0,<4.1.0" },
+    { name = "flask", specifier = ">=3.0.0,<3.2.0" },
+    { name = "flask-babel", specifier = ">=3.0.0,<5.0.0" },
     { name = "flask-dance", marker = "extra == 'oauth'", specifier = ">=2.0.0,<7.2.0" },
     { name = "flask-httpauth", specifier = ">=4.4.0,<5.0.0" },
-    { name = "flask-limiter", specifier = ">=2.3.0,<3.13.0" },
+    { name = "flask-limiter", specifier = ">=3.5.0,<4.0.0" },
     { name = "flask-principal", specifier = ">=0.3.2,<0.5.1" },
     { name = "flask-simpleldap", marker = "extra == 'ldap'", specifier = ">=1.4.0,<2.1.0" },
-    { name = "flask-wtf", specifier = ">=0.14.2,<1.3.0" },
+    { name = "flask-wtf", specifier = ">=1.1.0,<1.3.0" },
     { name = "gevent", marker = "extra == 'gdrive'", specifier = ">20.6.0,<24.12.0" },
     { name = "goodreads", marker = "extra == 'goodreads'", specifier = ">=0.3.2,<0.4.0" },
     { name = "google-api-python-client", marker = "extra == 'gdrive'", specifier = ">=2.73.0,<2.200.0" },
@@ -226,6 +227,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'gdrive'", specifier = ">=3.12,<6.1" },
     { name = "qrcode", specifier = ">=8.0" },
     { name = "rarfile", marker = "extra == 'metadata'", specifier = ">=3.2,<5.0" },
+    { name = "rauth", git = "https://github.com/UsamaFoad/rauth.git?rev=master" },
     { name = "regex", specifier = ">=2022.3.2,<2025.3.20" },
     { name = "requests", specifier = ">=2.32.0,<2.33.0" },
     { name = "rsa", marker = "extra == 'gdrive'", specifier = ">=3.4.2,<4.10.0" },
@@ -2764,12 +2766,11 @@ wheels = [
 
 [[package]]
 name = "rauth"
-version = "0.7.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.7.4"
+source = { git = "https://github.com/UsamaFoad/rauth.git?rev=master#bd0af43209c0d5c0d4fe59fe89b64edfea5c2a24" }
 dependencies = [
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/43/aa/7c8e852275394d65ac5bf3ac9945ecaafe4d083089e09cb0a267efea389a/rauth-0.7.3.tar.gz", hash = "sha256:524cdbc1c28560eacfc9a9d40c59525eb8d00fdf07fbad86107ea24411477b0a", size = 16530, upload-time = "2017-01-22T16:51:41.384Z" }
 
 [[package]]
 name = "referencing"

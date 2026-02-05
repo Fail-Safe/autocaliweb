@@ -3,15 +3,13 @@ name: Build & Push - Dev
 
 on:
   push:
-    branches:
-      - "**"
     paths:
       - "empty_library/**"
       - "cps/**"
       - "scripts/**"
       - "**/Dockerfile"
-      - "**/requirements.txt"
-      - "**/optional-requirements.txt"
+      - "**/pyproject.toml"
+      - "**/uv.lock"
       - "**/compile_translations.sh"
       - "koreader/**"
       - "**/cps.py"

@@ -1,18 +1,61 @@
+# VCS / GitHub metadata
 .git
 .github
+
+# Docker metadata
 .dockerignore
-.editorconfig
-.eslintrc
-.gitattributes
-.gitignore
+docker-compose*.yml
+
+# Editor / tooling configs (not needed to build runtime image)
+.vscode
+.idea
+
+# Python local envs / caches / artifacts
+.venv
+env
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+dist
+build
+
+# Local uv / pip caches
+.uv-cache
+.uv-lock-venv*
+.uv-lock-venv*/
+.uv-venv
+.uv-venv*/
+
+# Node / frontend artifacts
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Runtime / user data that should never be baked into an image
+*.db
+*.log
+settings.yaml
+gdrive_credentials
+client_secrets.json
+gmail.json
+.key
+.key.*
+
+# Repo docs / meta (optional; keep image smaller)
 CODE_OF_CONDUCT.md
 CONTRIBUTING.md
+SECURITY.md
 docker-compose.yml
 Dockerfile
 LICENSE
 README.md
-SECURITY.md
-.DS_Store
-**/__pycache__/
-*.pyc*
-.pytest_cache/

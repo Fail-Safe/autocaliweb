@@ -575,6 +575,30 @@ parse_arguments() {
                 fi
                 exit 0
                 ;;
+            --extras)
+                # Comma-separated list or repeated flag.
+                # Examples:
+                #   --extras kobo,gdrive
+                #   --extras kobo --extras gdrive
+                if [[ -z "${2:-}" || "$2" == -* ]]; then
+                    print_error "Option --extras requires an argument (e.g. --extras kobo,gdrive)."
+                    exit 1
+                fi
+                if [ -n "${UV_EXTRAS_RAW:-}" ]; then
+                    UV_EXTRAS_RAW="${UV_EXTRAS_RAW},$2"
+                else
+                    UV_EXTRAS_RAW="$2"
+                fi
+                shift 2
+                ;;
+            --all-extras)
+                UV_ALL_EXTRAS=1
+                shift
+                ;;
+            --no-extras)
+                UV_NO_EXTRAS=1
+                shift
+                ;;
             *)
                 print_error "Unknown option: $1"
                 print_status "Use --help to see available options."
@@ -588,6 +612,23 @@ parse_arguments() {
     CALIBRE_LIB_DIR="${LIBRARY_DIR:-$CALIBRE_LIB_DIR_DEFAULT}"
     INGEST_DIR="${INGEST_DIR:-$INGEST_DIR_DEFAULT}"
     LOG_FILE="${LOG_FILE:-$LOG_FILE_DEFAULT}"
+
+    # uv extras selection defaults
+    # - If user provides --extras, we install only those extras.
+    # - Else, default to --all-extras (matches historical behavior).
+    UV_ALL_EXTRAS="${UV_ALL_EXTRAS:-1}"
+    UV_NO_EXTRAS="${UV_NO_EXTRAS:-0}"
+    UV_EXTRAS_RAW="${UV_EXTRAS_RAW:-}"
+
+    # Normalize precedence:
+    # --no-extras overrides everything.
+    # --extras overrides default --all-extras.
+    if [ "$UV_NO_EXTRAS" -eq 1 ]; then
+        UV_ALL_EXTRAS=0
+        UV_EXTRAS_RAW=""
+    elif [ -n "$UV_EXTRAS_RAW" ]; then
+        UV_ALL_EXTRAS=0
+    fi
 }
 
 # Detect headless mode unless overridden
@@ -2956,26 +2997,50 @@ setup_autocaliweb() {
     print_status "Setting up Autocaliweb..."
     cd "$INSTALL_DIR" || exit 1
 
-    # Verify source code exists
-    if [ ! -f "requirements.txt" ] && [ ! -f "uv.lock" ]; then
-        print_error "Autocaliweb source not found in $INSTALL_DIR"
+    # Verify source code exists (uv/pyproject dependency workflow)
+    if [ ! -f "pyproject.toml" ] || [ ! -f "uv.lock" ]; then
+        print_error "Autocaliweb source not found in $INSTALL_DIR (missing pyproject.toml and/or uv.lock)."
+        print_error "This installer uses uv with a locked resolution. Make sure BOTH files exist:"
+        print_error "  - $INSTALL_DIR/pyproject.toml"
+        print_error "  - $INSTALL_DIR/uv.lock"
+        print_status "If you downloaded a release archive, re-download/extract it and try again."
         exit 1
     fi
 
-    # Ask about optional dependencies upfront
-    local use_optional=false
-    if [ -f "optional-requirements.txt" ]; then
-        if [ "$ACCEPT_ALL" = "1" ]; then
-            print_status "Auto-installing optional dependencies (--yes flag provided)"
-            use_optional=true
-            FIX_PYTHON_PAC=true
-        else
-            print_prompt "Do you want to install optional dependencies? (y/n)" USER_CONFIRMATION "true"
-            if [[ "$USER_CONFIRMATION" =~ ^[Yy]$ ]]; then
-                use_optional=true
-                FIX_PYTHON_PAC=true
-            fi
-        fi
+    # Dependency strategy: uv + uv.lock (locked, reproducible).
+    # We do NOT generate locks during install. If you changed dependencies, run `uv lock`
+    # beforehand and ensure uv.lock is present in the install source.
+    FIX_PYTHON_PAC=true
+
+    # Determine extras selection for uv sync.
+    # Defaults:
+    #   - if no flags are provided: install ALL extras (historical behavior)
+    # Flags:
+    #   --all-extras          force all integrations/extras
+    #   --no-extras           install core only
+    #   --extras a,b,c        install only selected extras (comma-separated; can be repeated)
+    local use_all_extras=0
+    local use_no_extras=0
+    local extras_raw="${UV_EXTRAS_RAW:-}"
+
+    if [ "${UV_ALL_EXTRAS:-0}" -eq 1 ]; then
+        use_all_extras=1
+    fi
+    if [ "${UV_NO_EXTRAS:-0}" -eq 1 ]; then
+        use_no_extras=1
+    fi
+
+    if [ "$use_no_extras" -eq 1 ]; then
+        use_all_extras=0
+        extras_raw=""
+        print_status "uv extras: none (--no-extras)"
+    elif [ -n "$extras_raw" ]; then
+        use_all_extras=0
+        print_status "uv extras: selected (--extras ${extras_raw})"
+    else
+        # default behavior: all extras
+        use_all_extras=1
+        print_status "uv extras: all (--all-extras default)"
     fi
 
     # Create .venv if missing
@@ -2986,17 +3051,24 @@ setup_autocaliweb() {
         run_with_progress sudo -u "$SERVICE_USER" python3 -m venv .venv
     fi
 
-    # --- Try uv first if lock file exists ---
+    # --- Prefer uv (pyproject.toml + uv.lock) ---
     local UV_OK=0
-    if [ -f "uv.lock" ]; then
-        print_status "Detected uv.lock → trying Astral uv for dependency installation"
 
-        # Ensure uv is installed in .venv
-        if ! sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/uv" --version >/dev/null 2>&1; then
-            print_status "Installing uv (fast Python package manager)..."
-            if ! run_with_progress sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/pip" install -U uv; then
-                print_warning "Failed to install uv — will fall back to pip-tools later"
-            fi
+    print_status "Dependency install method: uv (locked) using uv.lock"
+    print_status "If you don't want every optional integration, re-run later with a script option to limit extras (future enhancement)."
+
+    # Ensure uv is installed in .venv
+    if ! sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/uv" --version >/dev/null 2>&1; then
+        print_status "Installing uv (fast Python package manager)..."
+        if ! run_with_progress sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/pip" install -U uv; then
+            print_error "Failed to install uv into $INSTALL_DIR/.venv."
+            print_error "Common causes:"
+            print_error "  - Missing build tools / SSL CA certificates"
+            print_error "  - Network/DNS/proxy restrictions"
+            print_error "  - pip configuration blocking installs"
+            print_error "Try manually (as the service user) and re-run:"
+            print_error "  sudo -u $SERVICE_USER $INSTALL_DIR/.venv/bin/pip install -U uv"
+            exit 1
         fi
     fi
 
@@ -3007,80 +3079,45 @@ setup_autocaliweb() {
     # build uv sync command (use array to avoid quoting problems)
     uv_cmd=(sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/uv" --directory "$INSTALL_DIR" sync --locked --no-install-project)
 
-    # If user asked for optional dependencies, add the uv flag:
-    if [ "$use_optional" = true ]; then
+    if [ "$use_all_extras" -eq 1 ]; then
         uv_cmd+=(--all-extras)
-        print_status "Installing extras via uv (--all-extras)"
+        print_status "Installing all extras via uv (--all-extras)"
+    elif [ -n "$extras_raw" ]; then
+        # Convert comma/space separated list to repeated --extra flags
+        # shellcheck disable=SC2206
+        extras_raw="${extras_raw// /,}"
+        IFS=',' read -r -a extras_arr <<< "$extras_raw"
+        for ex in "${extras_arr[@]}"; do
+            # trim whitespace
+            ex="$(echo "$ex" | xargs)"
+            if [ -n "$ex" ]; then
+                uv_cmd+=(--extra "$ex")
+            fi
+        done
+        print_status "Installing selected extras via uv: ${extras_raw}"
+    else
+        print_status "Installing core dependencies only (no extras)"
     fi
 
     if run_with_progress "${uv_cmd[@]}"; then
         UV_OK=1
     else
-        print_warning "uv sync with --locked (and extras) failed. Attempting to regenerate uv.lock and retry..."
-        # try to regenerate then sync without locked (same array technique)
-        if run_with_progress sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/uv" --directory "$INSTALL_DIR" lock; then
-            uv_cmd=(sudo -u "$SERVICE_USER" "$INSTALL_DIR/.venv/bin/uv" --directory "$INSTALL_DIR" sync --no-install-project)
-            if [ "$use_optional" = true ]; then uv_cmd+=(--all-extras); fi
-            if run_with_progress "${uv_cmd[@]}"; then
-                UV_OK=1
-            else
-                print_warning "uv sync still failed after regenerating lockfile."
-            fi
-        else
-            print_warning "uv lock regeneration failed."
-        fi
+        print_error "uv sync failed in locked mode (uv.lock could not be applied)."
+        print_error "Common causes:"
+        print_error "  - uv.lock is out of date for this pyproject.toml (run `uv lock` on the same source tree)"
+        print_error "  - Python version/platform differs from what the lock supports"
+        print_error "  - a dependency requires OS build deps (e.g. LDAP headers) not present on your system"
+        print_error "This installer does not regenerate lockfiles. Fix the lock/source and re-run."
+        UV_OK=0
     fi
 
-    # --- If uv failed or no uv.lock fallback to pip-tools ---
+    # --- uv is required; no legacy requirements lock fallback ---
     if [ "$UV_OK" -eq 0 ]; then
-        print_status "Using pip-tools workflow (no usable uv.lock found)..."
-
         # shellcheck disable=SC1091
         source "$INSTALL_DIR/.venv/bin/activate"
 
-        run_with_progress sudo -u "$SERVICE_USER" \
-            "$INSTALL_DIR/.venv/bin/pip" install -U pip wheel pip-tools
-
-        if [ "$use_optional" = true ]; then
-            if [ -f "combined-requirements.lock" ]; then
-                print_status "Installing core + optional dependencies from lock file..."
-                run_with_progress sudo -u "$SERVICE_USER" \
-                    "$INSTALL_DIR/.venv/bin/pip-sync" combined-requirements.lock
-            else
-                print_status "Generating combined requirements on-the-fly..."
-                print_status "Please be patient, this process can take several minutes..."
-                (
-                    cat requirements.txt
-                    echo
-                    cat optional-requirements.txt
-                ) >combined-requirements.txt
-                if run_with_progress sudo -u "$SERVICE_USER" \
-                    "$INSTALL_DIR/.venv/bin/pip-compile" \
-                    --strip-extras combined-requirements.txt --output-file combined-requirements.lock; then
-                    run_with_progress sudo -u "$SERVICE_USER" \
-                        "$INSTALL_DIR/.venv/bin/pip-sync" combined-requirements.lock
-                else
-                    run_with_progress sudo -u "$SERVICE_USER" \
-                        "$INSTALL_DIR/.venv/bin/pip" install -r requirements.txt -r optional-requirements.txt
-                fi
-                rm -f combined-requirements.txt
-            fi
-        else
-            if [ -f "requirements.lock" ]; then
-                run_with_progress sudo -u "$SERVICE_USER" \
-                    "$INSTALL_DIR/.venv/bin/pip-sync" requirements.lock
-            else
-                if sudo -u "$SERVICE_USER" \
-                    "$INSTALL_DIR/.venv/bin/pip-compile" \
-                    --strip-extras requirements.txt --output-file requirements.lock; then
-                    run_with_progress sudo -u "$SERVICE_USER" \
-                        "$INSTALL_DIR/.venv/bin/pip-sync" requirements.lock
-                else
-                    run_with_progress sudo -u "$SERVICE_USER" \
-                        "$INSTALL_DIR/.venv/bin/pip" install -r requirements.txt
-                fi
-            fi
-        fi
+        print_error "uv sync failed; cannot continue without a working uv/uv.lock install"
+        exit 1
     fi
 
     print_status "Using Python environment: $INSTALL_DIR/.venv"
@@ -4581,7 +4618,7 @@ detect_script_location() {
     # installation / source check parent directory
     local parent_dir
     parent_dir="$(dirname "$script_dir")"
-    if [[ -f "$parent_dir/requirements.txt" && -f "$parent_dir/cps.py" &&
+    if [[ -f "$parent_dir/uv.lock" && -f "$parent_dir/pyproject.toml" && -f "$parent_dir/cps.py" &&
         -f "$parent_dir/cps/__init__.py" ]]; then
         print_verbose "Script is running from scripts/ subdirectory of autocaliweb"
         SCRIPT_SOURCE_DIR="$parent_dir"
@@ -4688,7 +4725,7 @@ detect_and_classify_installation() {
     elif [ "$has_template" = "true" ]; then
         SCENARIO="extracted_with_template"
         print_status "Detected: Extracted installation with template files"
-    elif [ -f "$INSTALL_DIR/requirements.txt" ]; then
+    elif [ -f "$INSTALL_DIR/uv.lock" ] && [ -f "$INSTALL_DIR/pyproject.toml" ]; then
         SCENARIO="extracted_without_template"
         print_status "Detected: Extracted source without template files"
     else
@@ -4852,8 +4889,7 @@ main() {
         print_status "Attempting to resolve dependency conflicts..."
         # shellcheck disable=SC1091
         source "$INSTALL_DIR/.venv/bin/activate"
-        "$INSTALL_DIR/.venv/bin/pip" install -r requirements.txt --force-reinstall --no-deps
-        "$INSTALL_DIR/.venv/bin/pip" install -r requirements.txt # Reinstall with dependencies
+        "$INSTALL_DIR/.venv/bin/uv" --directory "$INSTALL_DIR" sync --locked --no-install-project --all-extras
     fi
 
     install_external_tools
