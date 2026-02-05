@@ -1,7 +1,7 @@
 {% import 'image.html' as image %}
 {% extends "layout.html" %}
 {% block body %}
-<div class="discover" data-current-shelf-id="{{ shelf.id }}">
+<div class="discover load-more" data-current-shelf-id="{{ shelf.id }}">
   <h2>{{title}}</h2>
       <!--form  method="post"--->
   {% if current_user.role_download() and not shelf.is_generated %}
@@ -15,7 +15,7 @@
       </form>
       {% if entries.__len__() %}
       <a id="order_shelf" href="{{ url_for('shelf.order_shelf', shelf_id=shelf.id) }}" class="btn btn-primary">{{ _('Arrange books manually') }} </a>
-      <button id="toggle_order_shelf" data-alt-text="{% if status == "on" %}{{_('Disable Change order')}}{% else %}{{_('Enable Change order')}}{% endif %}" data-view="shelf" class="btn btn-primary{% if status == 'on' %} dummy">{{ _('Enable Change order') }}{% else%}">{{ _('Disable Change order') }}{% endif %}</button>
+      <button id="toggle_order_shelf" data-alt-text="{% if status == "on" %}{{_('Disable Change order')}}{% else %}{{_('Enable Change order')}}{% endif %}" data-view="shelf" class="btn btn-primary{% if status == 'on' %} dummy">{{ _('Enable Change order') }}{% else%}">{{ _('Disable Change order') }} {% endif %}</button>
         <div class="filterheader hidden-xs">
           <a data-toggle="tooltip" title="{{_('Sort according to book date, newest first')}}" id="new" class="btn btn-primary {% if order == "new" %} active{% endif %}{% if status == "on" %} disabled{% endif %}" href="{{url_for('shelf.show_shelf', shelf_id=shelf.id, sort_param='new')}}"><span class="glyphicon glyphicon-book"></span> <span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order"></span></a>
           <a data-toggle="tooltip" title="{{_('Sort according to book date, oldest first')}}" id="old" class="btn btn-primary {% if order == 'old' %} active{% endif %}{% if status == 'on' %} disabled{% endif %}" href="{{url_for('shelf.show_shelf', shelf_id=shelf.id, sort_param='old')}}"><span class="glyphicon glyphicon-book"></span> <span class="glyphicon glyphicon-calendar"></span><span class="glyphicon glyphicon-sort-by-order-alt"></span></a>
@@ -111,6 +111,11 @@
   <div id="shelf-empty-placeholder" class="alert alert-info text-center{% if entries.__len__() %} hidden{% endif %}" role="status">
     {{ _('This shelf is empty.') }}
   </div>
+
+  {# Pagination (needed for infinite scroll). Keep existing pagination markup if provided by backend. #}
+  {% if pagination %}
+    {{ pagination.links }}
+  {% endif %}
 </div>
 {% endblock %}
 {% block modal %}

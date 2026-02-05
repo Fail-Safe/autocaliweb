@@ -1158,7 +1158,18 @@ class CalibreDB:
         entries = list()
         pagination = list()
         try:
-            pagination = Pagination(page, pagesize, query.count())
+            # When outer joins are present, COUNT(*) can be inflated by duplicate book rows.
+            # Use COUNT(DISTINCT book.id) to get a correct total for pagination.
+            try:
+                total_count = (
+                    query.with_entities(func.count(func.distinct(Books.id))).scalar()
+                    or 0
+                )
+            except Exception:
+                # Fallback to original count behavior if the distinct count path fails for any reason.
+                total_count = query.count()
+
+            pagination = Pagination(page, pagesize, total_count)
             entries = query.order_by(*order).offset(off).limit(pagesize).all()
         except Exception as ex:
             log.error_or_exception(ex)

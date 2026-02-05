@@ -515,19 +515,24 @@ $(function () {
         });
     }
 
-    $(".discover .row").isotope({
-        // options
-        itemSelector: ".book",
-        layoutMode: "fitRows",
-    });
+    // Strict grid layout: disable masonry/isotope for book lists so Bootstrap rows align.
+    // Keep a cached reference for infinite scroll appends.
+    var $loadMoreContainer = $(".load-more .row");
 
-    if ($(".load-more").length && $(".next").length) {
+    if (
+        $(".load-more").length &&
+        $(".next").length &&
+        $(".load-more .book").length
+    ) {
+        var scrollElement = $("body").hasClass("blur") ? ".col-sm-10" : window;
         var $loadMore = $(".load-more .row").infiniteScroll({
             debug: false,
             // selector for the paged navigation (it will be hidden)
             path: ".next",
             // selector for the NEXT link (to page 2)
             append: ".load-more .book",
+            // Specify the scroll element - window for normal themes, .col-sm-10 for blur theme
+            elementScroll: scrollElement === window ? false : scrollElement,
             //animate      : true, # ToDo: Reenable function
             //extraScrollPx: 300
         });
@@ -540,26 +545,10 @@ $(function () {
                 if ($("body").hasClass("blur")) {
                     $(" a:not(.dropdown-toggle) ").removeAttr("data-toggle");
                 }
-                $(".load-more .row").isotope("appended", $(data), null);
+                // Strict grid layout: items are already appended by infiniteScroll via `append`,
+                // so no isotope/masonry relayout is needed here.
             },
         );
-
-        // fix for infinite scroll on CaliBlur Theme (#981)
-        if ($("body").hasClass("blur")) {
-            $(".col-sm-10").bind("scroll", function () {
-                if (
-                    $(this).scrollTop() + $(this).innerHeight() >=
-                    $(this)[0].scrollHeight
-                ) {
-                    $loadMore.infiniteScroll("loadNextPage");
-                    window.history.replaceState(
-                        {},
-                        null,
-                        $loadMore.infiniteScroll("getAbsolutePath"),
-                    );
-                }
-            });
-        }
     }
 
     $("#restart").click(function () {
@@ -1039,9 +1028,8 @@ $(function () {
         }
     });
 
-    $(window).resize(function () {
-        $(".discover .row").isotope("layout");
-    });
+    // Strict grid layout: no isotope layout on resize.
+    $(window).resize(function () {});
 
     $("#import_ldap_users").click(function () {
         $("#DialogHeader").addClass("hidden");
@@ -1071,7 +1059,7 @@ $(function () {
         $(this).html() === $(this).data("collapse-caption")
             ? $(this).html("(...)")
             : $(this).html($(this).data("collapse-caption"));
-        $(".discover .row").isotope("layout");
+        // Strict grid layout: no isotope layout needed for author expand/collapse.
     });
 
     $(".update-view").click(function (e) {
