@@ -1,5 +1,39 @@
 # ![Logo Light](https://github.com/gelbphoenix/autocaliweb/raw/refs/heads/main/cps/static/icon-light.svg) Autocaliweb
 
+## Dependency management (uv)
+
+Autocaliweb uses `pyproject.toml` + `uv.lock` as the canonical dependency source of truth.
+
+- `pyproject.toml` defines core dependencies and optional feature extras under `[project.optional-dependencies]`.
+- `uv.lock` pins a reproducible resolution across supported Python versions.
+- CI/Docker/manual install rely on `uv sync --locked`.
+
+### Developer workflow (local)
+
+Create an environment and install dependencies:
+
+```bash
+uv sync --locked --all-extras
+```
+
+Update dependency pins (regenerate lock):
+
+```bash
+uv lock
+```
+
+> [!IMPORTANT]
+> Commit both `pyproject.toml` and `uv.lock` when changing dependencies.
+
+### Selecting extras
+
+`--all-extras` installs all optional integrations (LDAP, OAuth, GDrive, etc). If you only want specific features enabled, install only the extras you need:
+
+```bash
+uv sync --locked --extra kobo --extra gdrive
+```
+
+
 Autocaliweb is a web app that offers a clean and intuitive interface for browsing, reading, and downloading eBooks using a valid [Calibre](https://calibre-ebook.com) database.
 
 [![License](https://img.shields.io/github/license/gelbphoenix/autocaliweb?style=flat-square)](https://github.com/gelbphoenix/autocaliweb/blob/main/LICENSE)
@@ -128,6 +162,12 @@ services:
 ```
 
 ### Manual installation without Docker (on your own risk)
+
+The manual installer uses `uv.lock` and `pyproject.toml` to install dependencies (no pip-tools / requirements lockfiles).
+
+- Ensure your installation source includes both `pyproject.toml` and `uv.lock`.
+- If you modify dependencies, run `uv lock` and keep `uv.lock` committed/synced.
+
 
 If you want to install Autocaliweb on your server without setting up Docker and Docker compose you can follow these steps (For an extensive installation and the uninstall guide look at the [relating wiki article](https://github.com/gelbphoenix/autocaliweb/wiki/Manual-Installation)):
 
