@@ -1,6 +1,6 @@
 ### Python ###
 # Byte-compiled / optimized / DLL files
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 
@@ -9,6 +9,7 @@ __pycache__/
 .python-version
 .pytest_cache/
 env/
+.venv/
 venv/
 eggs/
 dist/
@@ -41,3 +42,11 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+### macOS ###
+.DS_Store
+
+### Windows ###
+Thumbs.db
+ehthumbs.db
+Desktop.ini

@@ -3266,14 +3266,57 @@ def HandleBookDeletionRequest(book_uuid):
 
     book_id = book.id
 
-    if not _effective_only_kobo_shelves_sync(
-        current_user
-    ) and current_user.check_visibility(32768):
-        kobo_sync_status.change_archived_books(book_id, True)
+    # Per-user behavior for Kobo "Remove this book" (DELETE):
+    # - "archive" (default): archive in ACW (hide from main library view) + remove from sync state
+    # - "unsync_shelf": remove from the local-only "Kobo Sync" opt-in shelf (hybrid mode) + remove from sync state;
+    #                  do NOT archive/hide in ACW
+    #
+    # Note: In hybrid mode, shelf membership is the eligibility gate. Removing from the opt-in shelf is the
+    # correct interpretation of "remove from Kobo sync shelf".
+    remove_behavior = getattr(current_user, "kobo_remove_behavior", None) or "archive"
 
-    is_archived = kobo_sync_status.change_archived_books(book_id, True)
-    if is_archived:
+    if remove_behavior not in ("archive", "unsync_shelf"):
+        remove_behavior = "archive"
+
+    if remove_behavior == "archive":
+        # Preserve existing behavior (archive + unsync).
+        if not _effective_only_kobo_shelves_sync(
+            current_user
+        ) and current_user.check_visibility(32768):
+            kobo_sync_status.change_archived_books(book_id, True)
+
+        is_archived = kobo_sync_status.change_archived_books(book_id, True)
+        if is_archived:
+            kobo_sync_status.remove_synced_book(book_id)
+    elif remove_behavior == "unsync_shelf":
+        # "unsync_shelf": don't toggle archive bit.
+        # Best-effort: remove the book from the hybrid opt-in shelf if it exists for this user.
+        try:
+            opt_in_shelf = (
+                ub.session.query(ub.Shelf)
+                .filter(
+                    ub.Shelf.user_id == current_user.id,
+                    ub.Shelf.name == "Kobo Sync",
+                )
+                .first()
+            )
+            if opt_in_shelf:
+                ub.session.query(ub.BookShelf).filter(
+                    ub.BookShelf.shelf == opt_in_shelf.id,
+                    ub.BookShelf.book_id == book_id,
+                ).delete(synchronize_session=False)
+                opt_in_shelf.last_modified = datetime.now(timezone.utc)
+                ub.session.commit()
+        except Exception:
+            # Do not fail the DELETE request if local shelf bookkeeping fails.
+            try:
+                ub.session.rollback()
+            except Exception:
+                pass
+
+        # Always remove from Kobo sync state so the next sync can reflect removal promptly.
         kobo_sync_status.remove_synced_book(book_id)
+
     return "", 204
 
 

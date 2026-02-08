@@ -25,7 +25,7 @@ var selectionSet = new Set();
 var booksTableI18n = null;
 
 function getBooksTableI18n() {
-    var el = document.getElementById('books-table-i18n');
+    var el = document.getElementById("books-table-i18n");
     return el && el.dataset ? el.dataset : {};
 }
 
@@ -40,17 +40,20 @@ function btI18n(key, fallback) {
 }
 
 function btFormatNamed(template, values) {
-    if (!template) return '';
-    var result = String(template).replace(/%\(([^)]+)\)s/g, function (match, key) {
-        if (!values || values[key] === undefined || values[key] === null) {
-            return match;
-        }
-        return String(values[key]);
-    });
+    if (!template) return "";
+    var result = String(template).replace(
+        /%\(([^)]+)\)s/g,
+        function (match, key) {
+            if (!values || values[key] === undefined || values[key] === null) {
+                return match;
+            }
+            return String(values[key]);
+        },
+    );
 
     if (values) {
         Object.keys(values).forEach(function (key) {
-            var token = '__' + String(key).toUpperCase() + '__';
+            var token = "__" + String(key).toUpperCase() + "__";
             result = result.split(token).join(String(values[key]));
         });
     }
@@ -62,75 +65,86 @@ function syncSelectionSet() {
     selectionSet = new Set(
         $.map(selections, function (id) {
             return Number(id);
-        })
+        }),
     );
 }
 
 function updateSelectionStatus() {
-    var $el = $('#selection-status');
+    var $el = $("#selection-status");
     if (!$el.length) return;
     if (selections.length) {
-        $el.text(btFormatNamed(btI18n('selectionCount', '%(count)s selected'), {count: selections.length}));
+        $el.text(
+            btFormatNamed(btI18n("selectionCount", "%(count)s selected"), {
+                count: selections.length,
+            }),
+        );
     } else {
-        $el.text('');
+        $el.text("");
     }
 }
 
 function setBulkShelfButtonsEnabled(enabled) {
-    ['#bulk_add_to_shelf', '#bulk_remove_from_shelf'].forEach(function (selector) {
-        var $btn = $(selector);
-        if (!$btn.length) return;
-        $btn.toggleClass('disabled', !enabled);
-        $btn.attr('aria-disabled', !enabled);
-        $btn.prop('disabled', !enabled);
-    });
+    ["#bulk_add_to_shelf", "#bulk_remove_from_shelf"].forEach(
+        function (selector) {
+            var $btn = $(selector);
+            if (!$btn.length) return;
+            $btn.toggleClass("disabled", !enabled);
+            $btn.attr("aria-disabled", !enabled);
+            $btn.prop("disabled", !enabled);
+        },
+    );
 }
 
 function attachBooksTableExtrasToSearch() {
-    var $table = $('#books-table');
+    var $table = $("#books-table");
     if (!$table.length) return;
 
-    var $bootstrapTable = $table.closest('.bootstrap-table');
-    var $search = $bootstrapTable.find('.fixed-table-toolbar .search');
+    var $bootstrapTable = $table.closest(".bootstrap-table");
+    var $search = $bootstrapTable.find(".fixed-table-toolbar .search");
     if (!$search.length) return;
 
     // Place selection controls to the right of the search input.
-    var $selectionActions = $('#books-table-selection-actions');
-    if ($selectionActions.length && !$selectionActions.data('moved')) {
-        $selectionActions.data('moved', true);
+    var $selectionActions = $("#books-table-selection-actions");
+    if ($selectionActions.length && !$selectionActions.data("moved")) {
+        $selectionActions.data("moved", true);
         $selectionActions.appendTo($search);
     }
 
-    var $selectionStatus = $('#selection-status');
-    if ($selectionStatus.length && !$selectionStatus.data('moved')) {
-        $selectionStatus.data('moved', true);
+    var $selectionStatus = $("#selection-status");
+    if ($selectionStatus.length && !$selectionStatus.data("moved")) {
+        $selectionStatus.data("moved", true);
         $selectionStatus.appendTo($search);
     }
 }
 
 function showBulkShelfActionStatus(message, type, linkHref, linkText) {
-    var $status = $('#bulk-shelf-action-status');
+    var $status = $("#bulk-shelf-action-status");
     if (!$status.length) return;
 
-    var $text = $status.find('.bulk-shelf-status-text');
-    var $link = $status.find('.bulk-shelf-status-link');
+    var $text = $status.find(".bulk-shelf-status-text");
+    var $link = $status.find(".bulk-shelf-status-link");
 
     $status
-        .removeClass('alert-success alert-danger alert-warning alert-info')
-        .addClass(type === 'success' ? 'alert-success'
-            : type === 'warning' ? 'alert-warning'
-                : type === 'info' ? 'alert-info'
-                    : 'alert-danger');
+        .removeClass("alert-success alert-danger alert-warning alert-info")
+        .addClass(
+            type === "success"
+                ? "alert-success"
+                : type === "warning"
+                  ? "alert-warning"
+                  : type === "info"
+                    ? "alert-info"
+                    : "alert-danger",
+        );
 
     if ($text.length) {
-        $text.text(message || '');
+        $text.text(message || "");
     } else {
-        $status.text(message || '');
+        $status.text(message || "");
     }
 
     if ($link.length && linkHref) {
-        $link.attr('href', linkHref);
-        $link.text(linkText || btI18n('viewShelf', 'View shelf'));
+        $link.attr("href", linkHref);
+        $link.text(linkText || btI18n("viewShelf", "View shelf"));
         $link.show();
     } else if ($link.length) {
         $link.hide();
@@ -142,18 +156,18 @@ function showBulkShelfActionStatus(message, type, linkHref, linkText) {
     }, 10000);
 }
 
-$(function() {
-    $(document).on('click', '#bulk-shelf-action-status-close', function () {
-        $('#bulk-shelf-action-status').hide();
+$(function () {
+    $(document).on("click", "#bulk-shelf-action-status-close", function () {
+        $("#bulk-shelf-action-status").hide();
     });
 
-    $('#tasktable').bootstrapTable({
+    $("#tasktable").bootstrapTable({
         formatNoMatches: function () {
-            return '';
+            return "";
         },
-        striped: true
+        striped: true,
     });
-    if ($('#tasktable').length) {
+    if ($("#tasktable").length) {
         setInterval(function () {
             $.ajax({
                 method: "get",
@@ -161,13 +175,13 @@ $(function() {
                 async: true,
                 timeout: 900,
                 success: function (data) {
-                    $('#tasktable').bootstrapTable("load", data);
-                }
+                    $("#tasktable").bootstrapTable("load", data);
+                },
             });
         }, 1000);
     }
 
-    $("#cancel_task_confirm").click(function() {
+    $("#cancel_task_confirm").click(function () {
         //get data-id attribute of the clicked element
         var taskId = $(this).data("task-id");
         $.ajax({
@@ -175,28 +189,35 @@ $(function() {
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: getPath() + "/ajax/canceltask",
-            data: JSON.stringify({"task_id": taskId}),
+            data: JSON.stringify({ task_id: taskId }),
         });
     });
     //triggered when modal is about to be shown
-    $("#cancelTaskModal").on("show.bs.modal", function(e) {
+    $("#cancelTaskModal").on("show.bs.modal", function (e) {
         //get data-id attribute of the clicked element and store in button
         var taskId = $(e.relatedTarget).data("task-id");
         $(e.currentTarget).find("#cancel_task_confirm").data("task-id", taskId);
     });
 
-    $("#books-table").on("check.bs.table check-all.bs.table uncheck.bs.table uncheck-all.bs.table",
+    $("#books-table").on(
+        "check.bs.table check-all.bs.table uncheck.bs.table uncheck-all.bs.table",
         function (e, rowsAfter, rowsBefore) {
             var rows = rowsAfter;
 
             if (e.type === "uncheck-all") {
                 selections = [];
             } else {
-                var ids = $.map(!$.isArray(rows) ? [rows] : rows, function (row) {
-                    return row.id;
-                });
+                var ids = $.map(
+                    !$.isArray(rows) ? [rows] : rows,
+                    function (row) {
+                        return row.id;
+                    },
+                );
 
-                var func = $.inArray(e.type, ["check", "check-all"]) > -1 ? "union" : "difference";
+                var func =
+                    $.inArray(e.type, ["check", "check-all"]) > -1
+                        ? "union"
+                        : "difference";
                 selections = window._[func](selections, ids);
             }
             syncSelectionSet();
@@ -256,95 +277,148 @@ $(function() {
                 $("#delete_selection").attr("aria-disabled", false);
                 $("#table_xchange").removeClass("disabled");
                 $("#table_xchange").attr("aria-disabled", false);
-
             }
-
-        });
+        },
+    );
 
     $("#bulk-add-to-shelves, #bulk-remove-from-shelves").on(
-        'click',
-        'a[data-bulk-shelf-action]',
+        "click",
+        "a[data-bulk-shelf-action]",
         function (e) {
             e.preventDefault();
             if (selections.length < 1) {
-                showBulkShelfActionStatus(btI18n('noBooksSelected', 'No books selected'), 'danger');
+                showBulkShelfActionStatus(
+                    btI18n("noBooksSelected", "No books selected"),
+                    "danger",
+                );
                 return;
             }
-            var url = $(this).data('href');
+            var url = $(this).data("href");
             if (!url) return;
 
-            var shelfMatch = String(url).match(/\/(?:shelf)\/(?:bulkadd|bulkremove)\/(\d+)/);
+            var shelfMatch = String(url).match(
+                /\/(?:shelf)\/(?:bulkadd|bulkremove)\/(\d+)/,
+            );
             var shelfId = shelfMatch ? shelfMatch[1] : null;
             var shelfName = $(this).text().trim();
-            var shelfUrl = shelfId ? getPath() + '/shelf/' + shelfId : null;
+            var shelfUrl = shelfId ? getPath() + "/shelf/" + shelfId : null;
 
             $.ajax({
-                method: 'post',
-                contentType: 'application/json; charset=utf-8',
-                dataType: 'json',
+                method: "post",
+                contentType: "application/json; charset=utf-8",
+                dataType: "json",
                 url: url,
-                data: JSON.stringify({selections: selections}),
+                data: JSON.stringify({ selections: selections }),
             })
                 .done(function (res) {
                     if (res && res.success === false) {
-                        showBulkShelfActionStatus(res.msg || btI18n('error', 'Error'), 'danger');
+                        showBulkShelfActionStatus(
+                            res.msg || btI18n("error", "Error"),
+                            "danger",
+                        );
                         return;
                     }
 
-                    var action = res && res.removed !== undefined ? 'remove' : 'add';
-                    var added = res && typeof res.added === 'number' ? res.added : 0;
-                    var already = res && typeof res.already_in_shelf === 'number' ? res.already_in_shelf : 0;
-                    var removed = res && typeof res.removed === 'number' ? res.removed : 0;
-                    var notIn = res && typeof res.not_in_shelf === 'number' ? res.not_in_shelf : 0;
-                    var invalid = res && res.invalid && res.invalid.length ? res.invalid.length : 0;
+                    var action =
+                        res && res.removed !== undefined ? "remove" : "add";
+                    var added =
+                        res && typeof res.added === "number" ? res.added : 0;
+                    var already =
+                        res && typeof res.already_in_shelf === "number"
+                            ? res.already_in_shelf
+                            : 0;
+                    var removed =
+                        res && typeof res.removed === "number"
+                            ? res.removed
+                            : 0;
+                    var notIn =
+                        res && typeof res.not_in_shelf === "number"
+                            ? res.not_in_shelf
+                            : 0;
+                    var invalid =
+                        res && res.invalid && res.invalid.length
+                            ? res.invalid.length
+                            : 0;
 
-                    var msg = 'OK';
-                    var level = 'success';
+                    var msg = "OK";
+                    var level = "success";
 
-                    if (action === 'add') {
+                    if (action === "add") {
                         if (added === 0 && already > 0) {
-                            level = 'info';
+                            level = "info";
                             msg = btFormatNamed(
-                                btI18n('bulkNoChangesAlready', 'No changes — all selected books are already on shelf “%(shelf)s”.'),
-                                {shelf: shelfName}
+                                btI18n(
+                                    "bulkNoChangesAlready",
+                                    "No changes — all selected books are already on shelf “%(shelf)s”.",
+                                ),
+                                { shelf: shelfName },
                             );
                         } else {
                             msg = btFormatNamed(
-                                btI18n('bulkAdded', 'Added %(count)s to shelf “%(shelf)s”.'),
-                                {count: added, shelf: shelfName}
+                                btI18n(
+                                    "bulkAdded",
+                                    "Added %(count)s to shelf “%(shelf)s”.",
+                                ),
+                                { count: added, shelf: shelfName },
                             );
                             if (already) {
-                                msg += ' ' + btFormatNamed(
-                                    btI18n('bulkAlreadyOnShelf', '%(count)s already on shelf.'),
-                                    {count: already}
-                                );
+                                msg +=
+                                    " " +
+                                    btFormatNamed(
+                                        btI18n(
+                                            "bulkAlreadyOnShelf",
+                                            "%(count)s already on shelf.",
+                                        ),
+                                        { count: already },
+                                    );
                             }
                         }
                         if (invalid) {
-                            msg += ' ' + btFormatNamed(btI18n('bulkInvalid', '%(count)s invalid.'), {count: invalid});
+                            msg +=
+                                " " +
+                                btFormatNamed(
+                                    btI18n("bulkInvalid", "%(count)s invalid."),
+                                    { count: invalid },
+                                );
                         }
                     } else {
                         if (removed === 0 && notIn > 0) {
-                            level = 'info';
+                            level = "info";
                             msg = btFormatNamed(
-                                btI18n('bulkNoChangesNotOn', 'No changes — none of the selected books were on shelf “%(shelf)s”.'),
-                                {shelf: shelfName}
+                                btI18n(
+                                    "bulkNoChangesNotOn",
+                                    "No changes — none of the selected books were on shelf “%(shelf)s”.",
+                                ),
+                                { shelf: shelfName },
                             );
                         } else {
                             msg = btFormatNamed(
-                                btI18n('bulkRemoved', 'Removed %(count)s from shelf “%(shelf)s”.'),
-                                {count: removed, shelf: shelfName}
+                                btI18n(
+                                    "bulkRemoved",
+                                    "Removed %(count)s from shelf “%(shelf)s”.",
+                                ),
+                                { count: removed, shelf: shelfName },
                             );
                             if (notIn) {
-                                msg += ' ' + btFormatNamed(
-                                    btI18n('bulkNotOnShelf', '%(count)s not on shelf.'),
-                                    {count: notIn}
-                                );
+                                msg +=
+                                    " " +
+                                    btFormatNamed(
+                                        btI18n(
+                                            "bulkNotOnShelf",
+                                            "%(count)s not on shelf.",
+                                        ),
+                                        { count: notIn },
+                                    );
                             }
                         }
                     }
 
-                    showBulkShelfActionStatus(msg, level, shelfUrl, shelfUrl ? btI18n('viewShelf', 'View shelf') : null);
+                    showBulkShelfActionStatus(
+                        msg,
+                        level,
+                        shelfUrl,
+                        shelfUrl ? btI18n("viewShelf", "View shelf") : null,
+                    );
                     $("#books-table").bootstrapTable("refresh");
                     $("#books-table").bootstrapTable("uncheckAll");
                     if (window.refreshShelfCountPills) {
@@ -352,212 +426,234 @@ $(function() {
                     }
                 })
                 .fail(function (xhr) {
-                    var msg = btI18n('error', 'Error');
+                    var msg = btI18n("error", "Error");
                     if (xhr && xhr.responseJSON && xhr.responseJSON.msg) {
                         msg = xhr.responseJSON.msg;
                     } else if (xhr && xhr.responseText) {
                         msg = xhr.responseText;
                     }
-                    showBulkShelfActionStatus(msg, 'danger');
+                    showBulkShelfActionStatus(msg, "danger");
                 });
-        }
+        },
     );
 
     // Small block to initialize the state of the author/title sort inputs in metadata form
     {
-        let checkA = $('#autoupdate_authorsort').prop('checked');
-        $('#author_sort_input').prop('disabled', checkA);
-        let checkT = $('#autoupdate_titlesort').prop('checked');
-        $('#title_sort_input').prop('disabled', checkT);
+        let checkA = $("#autoupdate_authorsort").prop("checked");
+        $("#author_sort_input").prop("disabled", checkA);
+        let checkT = $("#autoupdate_titlesort").prop("checked");
+        $("#title_sort_input").prop("disabled", checkT);
     }
 
     // Disable/enable author and title sort input in respect to auto-update title/author sort being checked on or not
-    $("#autoupdate_authorsort").on('change', function(event) {
-            let checkA = $('#autoupdate_authorsort').prop('checked');
-            $('#author_sort_input').prop('disabled', checkA);
-    })
+    $("#autoupdate_authorsort").on("change", function (event) {
+        let checkA = $("#autoupdate_authorsort").prop("checked");
+        $("#author_sort_input").prop("disabled", checkA);
+    });
 
-    $("#autoupdate_titlesort").on('change', function(event) {
-            let checkT = $('#autoupdate_titlesort').prop('checked');
-            $('#title_sort_input').prop('disabled', checkT);
-    })
+    $("#autoupdate_titlesort").on("change", function (event) {
+        let checkT = $("#autoupdate_titlesort").prop("checked");
+        $("#title_sort_input").prop("disabled", checkT);
+    });
     /////
 
-    $("#delete_selection").click(function() {
+    $("#delete_selection").click(function () {
         $("#books-table").bootstrapTable("uncheckAll");
     });
 
-    $('#selection-actions').on('click', 'a[data-selection-action]', function (e) {
-        e.preventDefault();
-        var action = $(this).data('selection-action');
-        var $table = $('#books-table');
-        if (!$table.length) return;
+    $("#selection-actions").on(
+        "click",
+        "a[data-selection-action]",
+        function (e) {
+            e.preventDefault();
+            var action = $(this).data("selection-action");
+            var $table = $("#books-table");
+            if (!$table.length) return;
 
-        if (action === 'select-page') {
-            $table.bootstrapTable('checkAll');
-            return;
-        }
-
-        if (action === 'clear-page') {
-            var pageRows = $table.bootstrapTable('getData') || [];
-            var pageIds = $.map(pageRows, function (row) {
-                return row.id;
-            });
-            try {
-                $table.bootstrapTable('uncheckBy', {field: 'id', values: pageIds});
-            } catch (err) {
-                selections = window._.difference(selections, pageIds);
-                syncSelectionSet();
-                updateSelectionStatus();
-                setBulkShelfButtonsEnabled(selections.length >= 1);
-                $table.bootstrapTable('refresh');
+            if (action === "select-page") {
+                $table.bootstrapTable("checkAll");
+                return;
             }
-            return;
-        }
 
-        if (action === 'clear-all') {
-            $table.bootstrapTable('uncheckAll');
-            return;
-        }
+            if (action === "clear-page") {
+                var pageRows = $table.bootstrapTable("getData") || [];
+                var pageIds = $.map(pageRows, function (row) {
+                    return row.id;
+                });
+                try {
+                    $table.bootstrapTable("uncheckBy", {
+                        field: "id",
+                        values: pageIds,
+                    });
+                } catch (err) {
+                    selections = window._.difference(selections, pageIds);
+                    syncSelectionSet();
+                    updateSelectionStatus();
+                    setBulkShelfButtonsEnabled(selections.length >= 1);
+                    $table.bootstrapTable("refresh");
+                }
+                return;
+            }
 
-        if (action === 'select-all-results') {
-            if (!window.BOOKS_TABLE_ALL_IDS_URL) return;
-            var opts = $table.bootstrapTable('getOptions') || {};
-            var searchText = opts.searchText || '';
+            if (action === "clear-all") {
+                $table.bootstrapTable("uncheckAll");
+                return;
+            }
 
-            $('#selection-status').text(btI18n('loading', 'Loading…'));
-            $.ajax({
-                method: 'get',
-                dataType: 'json',
-                url: window.BOOKS_TABLE_ALL_IDS_URL,
-                data: {search: searchText, max: 10000},
-            })
-                .done(function (res) {
-                    if (!res || res.success === false) {
-                        $('#selection-status').text((res && res.msg) || btI18n('error', 'Error'));
-                        return;
-                    }
+            if (action === "select-all-results") {
+                if (!window.BOOKS_TABLE_ALL_IDS_URL) return;
+                var opts = $table.bootstrapTable("getOptions") || {};
+                var searchText = opts.searchText || "";
 
-                    var total = res.total || 0;
-                    var ids = res.ids || [];
-                    var confirmText = res.truncated
-                        ? btFormatNamed(
-                            btI18n('selectResultsConfirmTruncated', 'Select %(shown)s of %(total)s results?'),
-                            {shown: ids.length, total: total}
-                        )
-                        : btFormatNamed(
-                            btI18n('selectResultsConfirm', 'Select %(count)s results?'),
-                            {count: total}
-                        );
-
-                    var applySelection = function () {
-                        selections = window._.union(selections, ids);
-                        syncSelectionSet();
-                        updateSelectionStatus();
-                        setBulkShelfButtonsEnabled(selections.length >= 1);
-
-                        if (res.truncated) {
-                            $('#selection-status').text(
-                                btFormatNamed(
-                                    btI18n('selectedTruncated', '%(shown)s selected (truncated from %(total)s)'),
-                                    {shown: ids.length, total: total}
-                                )
+                $("#selection-status").text(btI18n("loading", "Loading…"));
+                $.ajax({
+                    method: "get",
+                    dataType: "json",
+                    url: window.BOOKS_TABLE_ALL_IDS_URL,
+                    data: { search: searchText, max: 10000 },
+                })
+                    .done(function (res) {
+                        if (!res || res.success === false) {
+                            $("#selection-status").text(
+                                (res && res.msg) || btI18n("error", "Error"),
                             );
-                        }
-
-                        $table.bootstrapTable('refresh');
-                    };
-
-                    var cancelSelection = function () {
-                        updateSelectionStatus();
-                    };
-
-                    if (typeof window.confirmDialog === 'function' && $('#GeneralChangeModal').length) {
-                        window.confirmDialog(
-                            'select_all_results',
-                            'GeneralChangeModal',
-                            null,
-                            applySelection,
-                            cancelSelection,
-                            {header: '', main: confirmText}
-                        );
-                    } else {
-                        if (!window.confirm(confirmText)) {
-                            updateSelectionStatus();
                             return;
                         }
-                        applySelection();
-                    }
-                })
-                .fail(function () {
-                    $('#selection-status').text(btI18n('error', 'Error'));
-                });
-        }
-    });
 
-    $("#merge_confirm").click(function() {
+                        var total = res.total || 0;
+                        var ids = res.ids || [];
+                        var confirmText = res.truncated
+                            ? btFormatNamed(
+                                  btI18n(
+                                      "selectResultsConfirmTruncated",
+                                      "Select %(shown)s of %(total)s results?",
+                                  ),
+                                  { shown: ids.length, total: total },
+                              )
+                            : btFormatNamed(
+                                  btI18n(
+                                      "selectResultsConfirm",
+                                      "Select %(count)s results?",
+                                  ),
+                                  { count: total },
+                              );
+
+                        var applySelection = function () {
+                            selections = window._.union(selections, ids);
+                            syncSelectionSet();
+                            updateSelectionStatus();
+                            setBulkShelfButtonsEnabled(selections.length >= 1);
+
+                            if (res.truncated) {
+                                $("#selection-status").text(
+                                    btFormatNamed(
+                                        btI18n(
+                                            "selectedTruncated",
+                                            "%(shown)s selected (truncated from %(total)s)",
+                                        ),
+                                        { shown: ids.length, total: total },
+                                    ),
+                                );
+                            }
+
+                            $table.bootstrapTable("refresh");
+                        };
+
+                        var cancelSelection = function () {
+                            updateSelectionStatus();
+                        };
+
+                        if (
+                            typeof window.confirmDialog === "function" &&
+                            $("#GeneralChangeModal").length
+                        ) {
+                            window.confirmDialog(
+                                "select_all_results",
+                                "GeneralChangeModal",
+                                null,
+                                applySelection,
+                                cancelSelection,
+                                { header: "", main: confirmText },
+                            );
+                        } else {
+                            if (!window.confirm(confirmText)) {
+                                updateSelectionStatus();
+                                return;
+                            }
+                            applySelection();
+                        }
+                    })
+                    .fail(function () {
+                        $("#selection-status").text(btI18n("error", "Error"));
+                    });
+            }
+        },
+    );
+
+    $("#merge_confirm").click(function () {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/mergebooks",
-            data: JSON.stringify({"Merge_books":selections}),
+            data: JSON.stringify({ Merge_books: selections }),
             success: function success() {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
-    $("#merge_books").click(function(event) {
+    $("#merge_books").click(function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#mergeModal').modal("show");
+            $("#mergeModal").modal("show");
         }
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/simulatemerge",
-            data: JSON.stringify({"Merge_books":selections}),
+            data: JSON.stringify({ Merge_books: selections }),
             success: function success(booTitles) {
-                $('#merge_from').empty();
-                $.each(booTitles.from, function(i, item) {
-                    $("<span>- " + item + "</span><p></p>").appendTo("#merge_from");
+                $("#merge_from").empty();
+                $.each(booTitles.from, function (i, item) {
+                    $("<span>- " + item + "</span><p></p>").appendTo(
+                        "#merge_from",
+                    );
                 });
                 $("#merge_to").text("- " + booTitles.to);
-
-            }
+            },
         });
     });
 
-    $("#edit_selected_books").click(function(event) {
+    $("#edit_selected_books").click(function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#edit_selected_modal').modal("show");
+            $("#edit_selected_modal").modal("show");
         }
     });
 
-    $("#edit_selected_confirm").click(function(event) {
+    $("#edit_selected_confirm").click(function (event) {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/editselectedbooks",
             data: JSON.stringify({
-                "selections": selections,
-                "title": $("#title_input").val(),
-                "title_sort": $("#title_sort_input").val(),
-                "author_sort": $("#author_sort_input").val(),
-                "authors": $("#authors_input").val(),
-                "categories": $("#categories_input").val(),
-                "series": $("#series_input").val(),
-                "languages": $("#languages_input").val(),
-                "publishers": $("#publishers_input").val(),
-                "comments": $("#comments_input").val().toString(),
-                "checkA": $("#autoupdate_authorsort").prop('checked').toString()
+                selections: selections,
+                title: $("#title_input").val(),
+                title_sort: $("#title_sort_input").val(),
+                author_sort: $("#author_sort_input").val(),
+                authors: $("#authors_input").val(),
+                categories: $("#categories_input").val(),
+                series: $("#series_input").val(),
+                languages: $("#languages_input").val(),
+                publishers: $("#publishers_input").val(),
+                comments: $("#comments_input").val().toString(),
+                checkA: $("#autoupdate_authorsort").prop("checked").toString(),
             }),
             success: function success(booTitles) {
                 $("#books-table").bootstrapTable("refresh");
@@ -574,207 +670,211 @@ $(function() {
                 $("#comments_input").val("");
 
                 handleListServerResponse;
-            }
+            },
         });
     });
 
-    $(document).on('click', '#archive_selected_books', function(event) {
+    $(document).on("click", "#archive_selected_books", function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#archive_selected_modal').modal("show");
+            $("#archive_selected_modal").modal("show");
         }
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/displayselectedbooks",
-            data: JSON.stringify({"selections":selections}),
+            data: JSON.stringify({ selections: selections }),
             success: function success(booTitles) {
-                $('#display-archive-selected-books').empty();
-                $.each(booTitles.books, function(i, item) {
-                    $("<span>- " + item + "</span><p></p>").appendTo("#display-archive-selected-books");
+                $("#display-archive-selected-books").empty();
+                $.each(booTitles.books, function (i, item) {
+                    $("<span>- " + item + "</span><p></p>").appendTo(
+                        "#display-archive-selected-books",
+                    );
                 });
-
-            }
+            },
         });
     });
 
-    $(document).on('click', '#archive_selected_confirm', function(event) {
+    $(document).on("click", "#archive_selected_confirm", function (event) {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/archiveselectedbooks",
-            data: JSON.stringify({"selections":selections, "archive": true}),
+            data: JSON.stringify({ selections: selections, archive: true }),
             success: function success(booTitles) {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
-    $(document).on('click', '#unarchive_selected_books', function(event) {
+    $(document).on("click", "#unarchive_selected_books", function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#unarchive_selected_modal').modal("show");
+            $("#unarchive_selected_modal").modal("show");
         }
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/displayselectedbooks",
-            data: JSON.stringify({"selections":selections}),
+            data: JSON.stringify({ selections: selections }),
             success: function success(booTitles) {
-                $('#display-unarchive-selected-books').empty();
-                $.each(booTitles.books, function(i, item) {
-                    $("<span>- " + item + "</span><p></p>").appendTo("#display-unarchive-selected-books");
+                $("#display-unarchive-selected-books").empty();
+                $.each(booTitles.books, function (i, item) {
+                    $("<span>- " + item + "</span><p></p>").appendTo(
+                        "#display-unarchive-selected-books",
+                    );
                 });
-
-            }
+            },
         });
     });
 
-    $(document).on('click', '#unarchive_selected_confirm', function(event) {
+    $(document).on("click", "#unarchive_selected_confirm", function (event) {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/archiveselectedbooks",
-            data: JSON.stringify({"selections":selections, "archive": false}),
+            data: JSON.stringify({ selections: selections, archive: false }),
             success: function success(booTitles) {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
-    $(document).on('click', '#delete_selected_books', function(event) {
+    $(document).on("click", "#delete_selected_books", function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#delete_selected_modal').modal("show");
+            $("#delete_selected_modal").modal("show");
         }
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/displayselectedbooks",
-            data: JSON.stringify({"selections":selections}),
+            data: JSON.stringify({ selections: selections }),
             success: function success(booTitles) {
-                $('#display-delete-selected-books').empty();
-                $.each(booTitles.books, function(i, item) {
-                    $("<span>- " + item + "</span><p></p>").appendTo("#display-delete-selected-books");
+                $("#display-delete-selected-books").empty();
+                $.each(booTitles.books, function (i, item) {
+                    $("<span>- " + item + "</span><p></p>").appendTo(
+                        "#display-delete-selected-books",
+                    );
                 });
-
-            }
+            },
         });
     });
 
-    $(document).on('click', '#delete_selected_confirm', function(event) {
+    $(document).on("click", "#delete_selected_confirm", function (event) {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/deleteselectedbooks",
-            data: JSON.stringify({"selections":selections}),
+            data: JSON.stringify({ selections: selections }),
             success: function success(booTitles) {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
-    $(document).on('click', '#read_selected_books', function(event) {
+    $(document).on("click", "#read_selected_books", function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#read_selected_modal').modal("show");
+            $("#read_selected_modal").modal("show");
         }
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/displayselectedbooks",
-            data: JSON.stringify({"selections":selections}),
+            data: JSON.stringify({ selections: selections }),
             success: function success(booTitles) {
-                $('#display-read-selected-books').empty();
-                $.each(booTitles.books, function(i, item) {
-                    $("<span>- " + item + "</span><p></p>").appendTo("#display-read-selected-books");
+                $("#display-read-selected-books").empty();
+                $.each(booTitles.books, function (i, item) {
+                    $("<span>- " + item + "</span><p></p>").appendTo(
+                        "#display-read-selected-books",
+                    );
                 });
-
-            }
+            },
         });
     });
 
-    $(document).on('click', '#read_selected_confirm', function(event) {
+    $(document).on("click", "#read_selected_confirm", function (event) {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/readselectedbooks",
-            data: JSON.stringify({"selections":selections, "markAsRead": true}),
+            data: JSON.stringify({ selections: selections, markAsRead: true }),
             success: function success(booTitles) {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
-    $(document).on('click', '#unread_selected_books', function(event) {
+    $(document).on("click", "#unread_selected_books", function (event) {
         if ($(this).hasClass("disabled")) {
-            event.stopPropagation()
+            event.stopPropagation();
         } else {
-            $('#unread_selected_modal').modal("show");
+            $("#unread_selected_modal").modal("show");
         }
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/displayselectedbooks",
-            data: JSON.stringify({"selections":selections}),
+            data: JSON.stringify({ selections: selections }),
             success: function success(booTitles) {
-                $('#display-unread-selected-books').empty();
-                $.each(booTitles.books, function(i, item) {
-                    $("<span>- " + item + "</span><p></p>").appendTo("#display-unread-selected-books");
+                $("#display-unread-selected-books").empty();
+                $.each(booTitles.books, function (i, item) {
+                    $("<span>- " + item + "</span><p></p>").appendTo(
+                        "#display-unread-selected-books",
+                    );
                 });
-
-            }
+            },
         });
     });
 
-    $(document).on('click', '#unread_selected_confirm', function(event) {
+    $(document).on("click", "#unread_selected_confirm", function (event) {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/readselectedbooks",
-            data: JSON.stringify({"selections":selections, "markAsRead": false}),
+            data: JSON.stringify({ selections: selections, markAsRead: false }),
             success: function success(booTitles) {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
-
-    $("#table_xchange").click(function() {
+    $("#table_xchange").click(function () {
         $.ajax({
-            method:"post",
+            method: "post",
             contentType: "application/json; charset=utf-8",
             dataType: "json",
             url: window.location.pathname + "/../ajax/xchange",
-            data: JSON.stringify({"xchange":selections}),
+            data: JSON.stringify({ xchange: selections }),
             success: function success() {
                 $("#books-table").bootstrapTable("refresh");
                 $("#books-table").bootstrapTable("uncheckAll");
-            }
+            },
         });
     });
 
     var column = [];
-    $("#books-table > thead > tr > th").each(function() {
+    $("#books-table > thead > tr > th").each(function () {
         var element = {};
         if ($(this).attr("data-edit")) {
             element = {
@@ -783,14 +883,18 @@ $(function() {
                     emptytext: "<span class='glyphicon glyphicon-plus'></span>",
                     success: function (response, __) {
                         if (!response.success) return response.msg;
-                        return {newValue: response.newValue};
+                        return { newValue: response.newValue };
                     },
                     params: function (params) {
-                        params.checkA = $('#autoupdate_authorsort').prop('checked');
-                        params.checkT = $('#autoupdate_titlesort').prop('checked');
-                        return params
-                    }
-                }
+                        params.checkA = $("#autoupdate_authorsort").prop(
+                            "checked",
+                        );
+                        params.checkT = $("#autoupdate_titlesort").prop(
+                            "checked",
+                        );
+                        return params;
+                    },
+                },
             };
             if ($(this).attr("data-editable-type") == "wysihtml5") {
                 //if (this.id == "comments") {
@@ -820,7 +924,7 @@ $(function() {
         search: true,
         showColumns: true,
         searchAlign: "left",
-        showSearchButton : true,
+        showSearchButton: true,
         searchOnEnterKey: true,
         checkboxHeader: false,
         maintainMetaData: true,
@@ -837,37 +941,49 @@ $(function() {
         },
         // eslint-disable-next-line no-unused-vars
         onEditableSave: function (field, row, oldvalue, $el) {
-            if ($.inArray(field, [ "title", "sort" ]) !== -1 && $('#autoupdate_titlesort').prop('checked')
-                || $.inArray(field, [ "authors", "author_sort" ]) !== -1 && $('#autoupdate_authorsort').prop('checked')) {
+            if (
+                ($.inArray(field, ["title", "sort"]) !== -1 &&
+                    $("#autoupdate_titlesort").prop("checked")) ||
+                ($.inArray(field, ["authors", "author_sort"]) !== -1 &&
+                    $("#autoupdate_authorsort").prop("checked"))
+            ) {
                 $.ajax({
-                    method:"get",
+                    method: "get",
                     dataType: "json",
-                    url: window.location.pathname + "/../ajax/sort_value/" + field + "/" + row.id,
+                    url:
+                        window.location.pathname +
+                        "/../ajax/sort_value/" +
+                        field +
+                        "/" +
+                        row.id,
                     success: function success(data) {
                         var key = Object.keys(data)[0];
-                        $("#books-table").bootstrapTable("updateCellByUniqueId", {
-                            id: row.id,
-                            field: key,
-                            value: data[key]
-                        });
-                    }
+                        $("#books-table").bootstrapTable(
+                            "updateCellByUniqueId",
+                            {
+                                id: row.id,
+                                field: key,
+                                value: data[key],
+                            },
+                        );
+                    },
                 });
             }
         },
         // eslint-disable-next-line no-unused-vars
         onColumnSwitch: function (field, checked) {
             var visible = $("#books-table").bootstrapTable("getVisibleColumns");
-            var hidden  = $("#books-table").bootstrapTable("getHiddenColumns");
+            var hidden = $("#books-table").bootstrapTable("getHiddenColumns");
             var st = "";
-            visible.forEach(function(item) {
-                st += "\"" + item.field + "\":\"" + "true" + "\",";
+            visible.forEach(function (item) {
+                st += '"' + item.field + '":"' + "true" + '",';
             });
-            hidden.forEach(function(item) {
-                st += "\"" + item.field + "\":\"" + "false" + "\",";
+            hidden.forEach(function (item) {
+                st += '"' + item.field + '":"' + "false" + '",';
             });
             st = st.slice(0, -1);
             $.ajax({
-                method:"post",
+                method: "post",
                 contentType: "application/json; charset=utf-8",
                 dataType: "json",
                 url: window.location.pathname + "/../ajax/table_settings",
@@ -879,18 +995,18 @@ $(function() {
     // Make sure toolbar exists before moving controls.
     setTimeout(attachBooksTableExtrasToSearch, 0);
 
-    $("#domain_allow_submit").click(function(event) {
+    $("#domain_allow_submit").click(function (event) {
         event.preventDefault();
         $("#domain_add_allow").ajaxForm();
         $(this).closest("form").submit();
-        $.ajax ({
-            method:"get",
+        $.ajax({
+            method: "get",
             url: window.location.pathname + "/../../ajax/domainlist/1",
             async: true,
             timeout: 900,
-            success:function(data) {
+            success: function (data) {
                 $("#domain-allow-table").bootstrapTable("load", data);
-            }
+            },
         });
     });
 
@@ -898,64 +1014,80 @@ $(function() {
         formatNoMatches: function () {
             return "";
         },
-        striped: false
+        striped: false,
     });
-    $("#domain_deny_submit").click(function(event) {
+    $("#domain_deny_submit").click(function (event) {
         event.preventDefault();
         $("#domain_add_deny").ajaxForm();
         $(this).closest("form").submit();
-        $.ajax ({
-            method:"get",
+        $.ajax({
+            method: "get",
             url: window.location.pathname + "/../../ajax/domainlist/0",
             async: true,
             timeout: 900,
-            success:function(data) {
+            success: function (data) {
                 $("#domain-deny-table").bootstrapTable("load", data);
-            }
+            },
         });
     });
     $("#domain-deny-table").bootstrapTable({
         formatNoMatches: function () {
             return "";
         },
-        striped: false
+        striped: false,
     });
 
     function domainHandle(domainId) {
         $.ajax({
-            method:"post",
+            method: "post",
             url: window.location.pathname + "/../../ajax/deletedomain",
-            data: {"domainid":domainId}
+            data: { domainid: domainId },
         });
         $.ajax({
-            method:"get",
+            method: "get",
             url: window.location.pathname + "/../../ajax/domainlist/1",
             async: true,
             timeout: 900,
-            success:function(data) {
+            success: function (data) {
                 $("#domain-allow-table").bootstrapTable("load", data);
-            }
+            },
         });
         $.ajax({
-            method:"get",
+            method: "get",
             url: window.location.pathname + "/../../ajax/domainlist/0",
             async: true,
             timeout: 900,
-            success:function(data) {
+            success: function (data) {
                 $("#domain-deny-table").bootstrapTable("load", data);
-            }
+            },
         });
     }
-    $("#domain-allow-table").on("click-cell.bs.table", function (field, value, row, $element) {
-        if (value === 2) {
-            confirmDialog("btndeletedomain", "GeneralDeleteModal", $element.id, domainHandle);
-        }
-    });
-    $("#domain-deny-table").on("click-cell.bs.table", function (field, value, row, $element) {
-        if (value === 2) {
-            confirmDialog("btndeletedomain", "GeneralDeleteModal", $element.id, domainHandle);
-        }
-    });
+    $("#domain-allow-table").on(
+        "click-cell.bs.table",
+        function (field, value, row, $element) {
+            if (value === 2) {
+                confirmDialog(
+                    "btndeletedomain",
+                    "GeneralDeleteModal",
+                    $element.id,
+                    domainHandle,
+                );
+            }
+        },
+    );
+    $("#domain-deny-table").on(
+        "click-cell.bs.table",
+        function (field, value, row, $element) {
+            if (value === 2) {
+                confirmDialog(
+                    "btndeletedomain",
+                    "GeneralDeleteModal",
+                    $element.id,
+                    domainHandle,
+                );
+            }
+        },
+    );
 
     $("#restrictModal").on("hidden.bs.modal", function (e) {
         // Destroy table and remove hooks for buttons
@@ -971,7 +1103,7 @@ $(function() {
 
     function startTable(target, userId) {
         var type = 0;
-        switch(target) {
+        switch (target) {
             case "get_column_values":
                 type = 1;
                 $("#h2").removeClass("hidden");
@@ -1019,11 +1151,11 @@ $(function() {
                 return "";
             },
             url: getPath() + "/ajax/listrestriction/" + type + "/" + userId,
-            rowStyle: function(row) {
+            rowStyle: function (row) {
                 if (row.id.charAt(0) === "a") {
-                    return {classes: "bg-primary"};
+                    return { classes: "bg-primary" };
                 } else {
-                    return {classes: "bg-dark-danger"};
+                    return { classes: "bg-dark-danger" };
                 }
             },
             onLoadSuccess: function () {
@@ -1032,83 +1164,125 @@ $(function() {
             },
             onClickCell: function (field, value, row) {
                 if (field === 3) {
-                    $.ajax ({
+                    $.ajax({
                         type: "Post",
-                        data: "id=" + row.id + "&type=" + row.type + "&Element=" + encodeURIComponent(row.Element),
-                        url: getPath() + "/ajax/deleterestriction/" + type + "/" + userId,
+                        data:
+                            "id=" +
+                            row.id +
+                            "&type=" +
+                            row.type +
+                            "&Element=" +
+                            encodeURIComponent(row.Element),
+                        url:
+                            getPath() +
+                            "/ajax/deleterestriction/" +
+                            type +
+                            "/" +
+                            userId,
                         async: true,
                         timeout: 900,
-                        success:function() {
+                        success: function () {
                             $.ajax({
-                                method:"get",
-                                url: getPath() + "/ajax/listrestriction/" + type + "/" + userId,
+                                method: "get",
+                                url:
+                                    getPath() +
+                                    "/ajax/listrestriction/" +
+                                    type +
+                                    "/" +
+                                    userId,
                                 async: true,
                                 timeout: 900,
-                                success:function(data) {
-                                    $("#restrict-elements-table").bootstrapTable("load", data);
-                                }
+                                success: function (data) {
+                                    $(
+                                        "#restrict-elements-table",
+                                    ).bootstrapTable("load", data);
+                                },
                             });
-                        }
+                        },
                     });
                 }
             },
-            striped: false
+            striped: false,
         });
         $("#restrict-elements-table").removeClass("table-hover");
-        $("#restrict-elements-table").on("editable-save.bs.table", function (e, field, row) {
-            $.ajax({
-                url: getPath() + "/ajax/editrestriction/" + type + "/" + userId,
-                type: "Post",
-                data: row
-            });
-        });
-        $("[id^=submit_]").click(function() {
+        $("#restrict-elements-table").on(
+            "editable-save.bs.table",
+            function (e, field, row) {
+                $.ajax({
+                    url:
+                        getPath() +
+                        "/ajax/editrestriction/" +
+                        type +
+                        "/" +
+                        userId,
+                    type: "Post",
+                    data: row,
+                });
+            },
+        );
+        $("[id^=submit_]").click(function () {
             $(this)[0].blur();
             $.ajax({
                 url: getPath() + "/ajax/addrestriction/" + type + "/" + userId,
                 type: "Post",
-                data: $(this).closest("form").serialize() + "&" + $(this)[0].name + "=",
+                data:
+                    $(this).closest("form").serialize() +
+                    "&" +
+                    $(this)[0].name +
+                    "=",
                 success: function () {
-                    $.ajax ({
-                        method:"get",
-                        url: getPath() + "/ajax/listrestriction/" + type + "/" + userId,
+                    $.ajax({
+                        method: "get",
+                        url:
+                            getPath() +
+                            "/ajax/listrestriction/" +
+                            type +
+                            "/" +
+                            userId,
                         async: true,
                         timeout: 900,
-                        success:function(data) {
-                            $("#restrict-elements-table").bootstrapTable("load", data);
-                        }
+                        success: function (data) {
+                            $("#restrict-elements-table").bootstrapTable(
+                                "load",
+                                data,
+                            );
+                        },
                     });
-                }
+                },
             });
             return;
         });
     }
 
-    $("#restrictModal").on("show.bs.modal", function(e) {
-         var target = $(e.relatedTarget).attr('id');
-         var dataId;
-         $(e.relatedTarget).one('focus', function(e){$(this).blur();});
-         if ($(e.relatedTarget).hasClass("button_head")) {
-             dataId = $('#user-table').bootstrapTable('getSelections').map(a => a.id);
-         } else {
-             dataId = $(e.relatedTarget).data("id");
-         }
-         startTable(target, dataId);
+    $("#restrictModal").on("show.bs.modal", function (e) {
+        var target = $(e.relatedTarget).attr("id");
+        var dataId;
+        $(e.relatedTarget).one("focus", function (e) {
+            $(this).blur();
+        });
+        if ($(e.relatedTarget).hasClass("button_head")) {
+            dataId = $("#user-table")
+                .bootstrapTable("getSelections")
+                .map((a) => a.id);
+        } else {
+            dataId = $(e.relatedTarget).data("id");
+        }
+        startTable(target, dataId);
     });
 
     // User table handling
     var user_column = [];
-    $("#user-table > thead > tr > th").each(function() {
+    $("#user-table > thead > tr > th").each(function () {
         var element = {};
         if ($(this).attr("data-edit")) {
             element = {
                 editable: {
                     mode: "inline",
                     emptytext: "<span class='glyphicon glyphicon-plus'></span>",
-                    error: function(response) {
+                    error: function (response) {
                         return response.responseText;
-                    }
-                }
+                    },
+                },
             };
         }
         var validateText = $(this).attr("data-edit-validate");
@@ -1132,7 +1306,7 @@ $(function() {
         search: true,
         showColumns: true,
         searchAlign: "left",
-        showSearchButton : true,
+        showSearchButton: true,
         searchOnEnterKey: true,
         checkboxHeader: true,
         maintainMetaData: true,
@@ -1141,19 +1315,19 @@ $(function() {
         formatNoMatches: function () {
             return "";
         },
-        onPostBody () {
+        onPostBody() {
             // Remove all checkboxes from Headers for showing the texts in the column selector
-            $('.columns [data-field]').each(function(){
+            $(".columns [data-field]").each(function () {
                 var elText = $(this).next().text();
                 $(this).next().empty();
-                var index = elText.lastIndexOf('\n', elText.length - 2);
-                if ( index > -1) {
+                var index = elText.lastIndexOf("\n", elText.length - 2);
+                if (index > -1) {
                     elText = elText.substr(index);
                 }
                 $(this).next().text(elText);
             });
         },
-        onPostHeader () {
+        onPostHeader() {
             move_header_elements();
         },
         onLoadSuccess: function () {
@@ -1161,50 +1335,60 @@ $(function() {
         },
         onColumnSwitch: function () {
             var visible = $("#user-table").bootstrapTable("getVisibleColumns");
-            var hidden  = $("#user-table").bootstrapTable("getHiddenColumns");
+            var hidden = $("#user-table").bootstrapTable("getHiddenColumns");
             var st = "";
-            visible.forEach(function(item) {
-                st += "\"" + item.name + "\":\"" + "true" + "\",";
+            visible.forEach(function (item) {
+                st += '"' + item.name + '":"' + "true" + '",';
             });
-            hidden.forEach(function(item) {
-                st += "\"" + item.name + "\":\"" + "false" + "\",";
+            hidden.forEach(function (item) {
+                st += '"' + item.name + '":"' + "false" + '",';
             });
             st = st.slice(0, -1);
             $.ajax({
-                method:"post",
+                method: "post",
                 contentType: "application/json; charset=utf-8",
                 dataType: "json",
-                url: window.location.pathname + "/../../ajax/user_table_settings",
+                url:
+                    window.location.pathname +
+                    "/../../ajax/user_table_settings",
                 data: "{" + st + "}",
             });
             handle_header_buttons();
         },
     });
 
-    $("#user-table").on("check.bs.table check-all.bs.table uncheck.bs.table uncheck-all.bs.table",
-    function (e, rowsAfter, rowsBefore) {
-        var rows = rowsAfter;
+    $("#user-table").on(
+        "check.bs.table check-all.bs.table uncheck.bs.table uncheck-all.bs.table",
+        function (e, rowsAfter, rowsBefore) {
+            var rows = rowsAfter;
 
-        if (e.type === "uncheck-all") {
-            selections = [];
-        } else {
-            var ids = $.map(!$.isArray(rows) ? [rows] : rows, function (row) {
-                return row.id;
-            });
-            var func = $.inArray(e.type, ["check", "check-all"]) > -1 ? "union" : "difference";
-            selections = window._[func](selections, ids);
-        }
-        handle_header_buttons();
-    });
+            if (e.type === "uncheck-all") {
+                selections = [];
+            } else {
+                var ids = $.map(
+                    !$.isArray(rows) ? [rows] : rows,
+                    function (row) {
+                        return row.id;
+                    },
+                );
+                var func =
+                    $.inArray(e.type, ["check", "check-all"]) > -1
+                        ? "union"
+                        : "difference";
+                selections = window._[func](selections, ids);
+            }
+            handle_header_buttons();
+        },
+    );
 });
 
-function handle_header_buttons () {
+function handle_header_buttons() {
     if (selections.length < 1) {
         $("#user_delete_selection").addClass("disabled");
         $("#user_delete_selection").attr("aria-disabled", true);
         $(".check_head").attr("aria-disabled", true);
         $(".check_head").attr("disabled", true);
-        $(".check_head").prop('checked', false);
+        $(".check_head").prop("checked", false);
         $(".button_head").attr("aria-disabled", true);
         $(".button_head").addClass("disabled");
         $(".multi_head").attr("aria-disabled", true);
@@ -1223,59 +1407,72 @@ function handle_header_buttons () {
         $(".multi_head").removeClass("hidden");
         $(".multi_selector").attr("aria-disabled", false);
         $(".multi_selector").removeAttr("disabled");
-        $('.multi_selector').selectpicker('refresh');
+        $(".multi_selector").selectpicker("refresh");
         $(".header_select").removeAttr("disabled");
     }
 }
 
 /* Function for deleting domain restrictions */
-function TableActions (value, row) {
+function TableActions(value, row) {
     return [
-        "<a class=\"danger remove\"  data-value=\"" + row.id
-        + "\" title=\"Remove\">",
-        "<i class=\"glyphicon glyphicon-trash\"></i>",
-        "</a>"
+        '<a class="danger remove"  data-value="' + row.id + '" title="Remove">',
+        '<i class="glyphicon glyphicon-trash"></i>',
+        "</a>",
     ].join("");
 }
 
 /* Function for deleting domain restrictions */
-function RestrictionActions (value, row) {
+function RestrictionActions(value, row) {
     return [
-        "<div class=\"danger remove\" data-restriction-id=\"" + row.id + "\" title=\"Remove\">",
-        "<i class=\"glyphicon glyphicon-trash\"></i>",
-        "</div>"
+        '<div class="danger remove" data-restriction-id="' +
+            row.id +
+            '" title="Remove">',
+        '<i class="glyphicon glyphicon-trash"></i>',
+        "</div>",
     ].join("");
 }
 
 /* Function for deleting books */
-function EbookActions (value, row) {
+function EbookActions(value, row) {
     return [
-        "<div class=\"book-remove\" data-toggle=\"modal\" data-target=\"#deleteModal\" data-ajax=\"1\" data-delete-id=\"" + row.id + "\" title=\"Remove\">",
-        "<i class=\"glyphicon glyphicon-trash\"></i>",
-        "</div>"
+        '<div class="book-remove" data-toggle="modal" data-target="#deleteModal" data-ajax="1" data-delete-id="' +
+            row.id +
+            '" title="Remove">',
+        '<i class="glyphicon glyphicon-trash"></i>',
+        "</div>",
     ].join("");
 }
 
 /* Function for deleting Users */
-function UserActions (value, row) {
+function UserActions(value, row) {
     return [
-        "<div class=\"user-remove\" data-value=\"delete\" onclick=\"deleteUser(this, '" + row.id + "')\" data-pk=\"" + row.id + "\" title=\"Remove\">",
-        "<i class=\"glyphicon glyphicon-trash\"></i>",
-        "</div>"
+        '<div class="user-remove" data-value="delete" onclick="deleteUser(this, \'' +
+            row.id +
+            '\')" data-pk="' +
+            row.id +
+            '" title="Remove">',
+        '<i class="glyphicon glyphicon-trash"></i>',
+        "</div>",
     ].join("");
 }
 
 /* Function for cancelling tasks */
-function TaskActions (value, row) {
+function TaskActions(value, row) {
     var cancellableStats = [0, 2];
-    if (row.task_id && row.is_cancellable && cancellableStats.includes(row.stat)) {
+    if (
+        row.task_id &&
+        row.is_cancellable &&
+        cancellableStats.includes(row.stat)
+    ) {
         return [
-            "<div class=\"danger task-cancel\" data-toggle=\"modal\" data-target=\"#cancelTaskModal\" data-task-id=\"" + row.task_id + "\" title=\"Cancel\">",
-            "<i class=\"glyphicon glyphicon-ban-circle\"></i>",
-            "</div>"
+            '<div class="danger task-cancel" data-toggle="modal" data-target="#cancelTaskModal" data-task-id="' +
+                row.task_id +
+                '" title="Cancel">',
+            '<i class="glyphicon glyphicon-ban-circle"></i>',
+            "</div>",
         ].join("");
     }
-    return '';
+    return "";
 }
 
 /* Function for keeping checked rows */
@@ -1287,81 +1484,154 @@ function responseHandler(res) {
 }
 
 function singleUserFormatter(value, row) {
-    return '<a class="btn btn-default" onclick="storeLocation()" href="' + window.location.pathname + '/../../admin/user/' + row.id + '">' + this.buttontext + '</a>'
+    return (
+        '<a class="btn btn-default" onclick="storeLocation()" href="' +
+        window.location.pathname +
+        "/../../admin/user/" +
+        row.id +
+        '">' +
+        this.buttontext +
+        "</a>"
+    );
 }
 
-function checkboxFormatter(value, row){
+function checkboxFormatter(value, row) {
     if (value & this.column)
-        return '<input type="checkbox" class="chk" data-pk="' + row.id + '" data-name="' + this.field + '" checked onchange="checkboxChange(this, ' + row.id + ', \'' + this.name + '\', ' + this.column + ')">';
+        return (
+            '<input type="checkbox" class="chk" data-pk="' +
+            row.id +
+            '" data-name="' +
+            this.field +
+            '" checked onchange="checkboxChange(this, ' +
+            row.id +
+            ", '" +
+            this.name +
+            "', " +
+            this.column +
+            ')">'
+        );
     else
-        return '<input type="checkbox" class="chk" data-pk="' + row.id + '" data-name="' + this.field + '" onchange="checkboxChange(this, ' + row.id + ', \'' + this.name + '\', ' + this.column + ')">';
+        return (
+            '<input type="checkbox" class="chk" data-pk="' +
+            row.id +
+            '" data-name="' +
+            this.field +
+            '" onchange="checkboxChange(this, ' +
+            row.id +
+            ", '" +
+            this.name +
+            "', " +
+            this.column +
+            ')">'
+        );
 }
-function bookCheckboxFormatter(value, row){
-    if (value)
-        return '<input type="checkbox" class="chk" data-pk="' + row.id + '" data-name="' + this.field + '" checked onchange="BookCheckboxChange(this, ' + row.id + ', \'' + this.name + '\')">';
-    else
-        return '<input type="checkbox" class="chk" data-pk="' + row.id + '" data-name="' + this.field + '" onchange="BookCheckboxChange(this, ' + row.id + ', \'' + this.name + '\')">';
+function bookCheckboxFormatter(value, row) {
+    var field = this && this.field ? this.field : this.name;
+    if (!field) {
+        field = "";
+    }
+
+    // Escape only for the JS string literal inside the onchange attribute.
+    var fieldForJs = String(field).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    var checked = value ? " checked" : "";
+
+    return `<input type="checkbox" class="chk" data-pk="${row.id}" data-name="${field}"${checked} onchange="BookCheckboxChange(this, ${row.id}, '${fieldForJs}')">`;
 }
 
-
-function singlecheckboxFormatter(value, row){
+function singlecheckboxFormatter(value, row) {
     if (value)
-        return '<input type="checkbox" class="chk" data-pk="' + row.id + '" data-name="' + this.field + '" checked onchange="checkboxChange(this, ' + row.id + ', \'' + this.name + '\', 0)">';
+        return (
+            '<input type="checkbox" class="chk" data-pk="' +
+            row.id +
+            '" data-name="' +
+            this.field +
+            '" checked onchange="checkboxChange(this, ' +
+            row.id +
+            ", '" +
+            this.name +
+            "', 0)\">"
+        );
     else
-        return '<input type="checkbox" class="chk" data-pk="' + row.id + '" data-name="' + this.field + '" onchange="checkboxChange(this, ' + row.id + ', \'' + this.name + '\', 0)">';
+        return (
+            '<input type="checkbox" class="chk" data-pk="' +
+            row.id +
+            '" data-name="' +
+            this.field +
+            '" onchange="checkboxChange(this, ' +
+            row.id +
+            ", '" +
+            this.name +
+            "', 0)\">"
+        );
 }
 
 function ratingFormatter(value, row) {
     if (value == 0) {
         return "";
     }
-    return (value/2);
+    return value / 2;
 }
-
 
 /* Do some hiding disabling after user list is loaded */
 function loadSuccess() {
     var guest = $(".editable[data-name='name'][data-value='Guest']");
     guest.editable("disable");
-    $("input:radio.check_head:checked").each(function() {
-        $(this).prop('checked', false);
+    $("input:radio.check_head:checked").each(function () {
+        $(this).prop("checked", false);
     });
-    $(".header_select").each(function() {
+    $(".header_select").each(function () {
         $(this).prop("selectedIndex", 0);
     });
-    $(".header_select").each(function() {
+    $(".header_select").each(function () {
         $(this).prop("selectedIndex", 0);
     });
-    $('.multi_selector').selectpicker('deselectAll');
-    $('.multi_selector').selectpicker('refresh');
-    $(".editable[data-name='locale'][data-pk='"+guest.data("pk")+"']").editable("disable");
-    $(".editable[data-name='locale'][data-pk='"+guest.data("pk")+"']").hide();
-    $("input[data-name='admin_role'][data-pk='"+guest.data("pk")+"']").prop("disabled", true);
-    $("input[data-name='passwd_role'][data-pk='"+guest.data("pk")+"']").prop("disabled", true);
-    $("input[data-name='edit_shelf_role'][data-pk='"+guest.data("pk")+"']").prop("disabled", true);
-    $("input[data-name='sidebar_read_and_unread'][data-pk='"+guest.data("pk")+"']").prop("disabled", true);
-    $(".user-remove[data-pk='"+guest.data("pk")+"']").hide();
+    $(".multi_selector").selectpicker("deselectAll");
+    $(".multi_selector").selectpicker("refresh");
+    $(
+        ".editable[data-name='locale'][data-pk='" + guest.data("pk") + "']",
+    ).editable("disable");
+    $(
+        ".editable[data-name='locale'][data-pk='" + guest.data("pk") + "']",
+    ).hide();
+    $("input[data-name='admin_role'][data-pk='" + guest.data("pk") + "']").prop(
+        "disabled",
+        true,
+    );
+    $(
+        "input[data-name='passwd_role'][data-pk='" + guest.data("pk") + "']",
+    ).prop("disabled", true);
+    $(
+        "input[data-name='edit_shelf_role'][data-pk='" +
+            guest.data("pk") +
+            "']",
+    ).prop("disabled", true);
+    $(
+        "input[data-name='sidebar_read_and_unread'][data-pk='" +
+            guest.data("pk") +
+            "']",
+    ).prop("disabled", true);
+    $(".user-remove[data-pk='" + guest.data("pk") + "']").hide();
 }
 
 function move_header_elements() {
     $(".header_select").each(function () {
         var item = $(this).parent();
         var parent = item.parent().parent();
-        if (parent.prop('nodeName') === "TH") {
+        if (parent.prop("nodeName") === "TH") {
             item.prependTo(parent);
         }
     });
     $(".form-check").each(function () {
         var item = $(this).parent();
         var parent = item.parent().parent();
-        if (parent.prop('nodeName') === "TH") {
+        if (parent.prop("nodeName") === "TH") {
             item.prependTo(parent);
         }
     });
     $(".multi_select").each(function () {
         var item = $(this);
         var parent = item.parent().parent();
-        if (parent.prop('nodeName') === "TH") {
+        if (parent.prop("nodeName") === "TH") {
             item.prependTo(parent);
             item.addClass("myselect");
         }
@@ -1373,7 +1643,9 @@ function move_header_elements() {
             $(".multi_head").on("click", function () {
                 var val = $(this).data("set");
                 var field = $(this).data("name");
-                var result = $('#user-table').bootstrapTable('getSelections').map(a => a.id);
+                var result = $("#user-table")
+                    .bootstrapTable("getSelections")
+                    .map((a) => a.id);
                 var values = $("#" + field).val();
                 confirmDialog(
                     "restrictions",
@@ -1382,16 +1654,24 @@ function move_header_elements() {
                     function () {
                         $.ajax({
                             method: "post",
-                            url: window.location.pathname + "/../../ajax/editlistusers/" + field,
-                            data: {"pk": result, "value": values, "action": val},
+                            url:
+                                window.location.pathname +
+                                "/../../ajax/editlistusers/" +
+                                field,
+                            data: { pk: result, value: values, action: val },
                             success: function (data) {
                                 handleListServerResponse(data);
                             },
                             error: function (data) {
-                                handleListServerResponse([{type: "danger", message: data.responseText}])
+                                handleListServerResponse([
+                                    {
+                                        type: "danger",
+                                        message: data.responseText,
+                                    },
+                                ]);
                             },
                         });
-                    }
+                    },
                 );
             });
         }
@@ -1419,7 +1699,9 @@ function move_header_elements() {
     if ($(".button_head").length) {
         if (!$._data($(".button_head").get(0), "events")) {
             $(".button_head").on("click", function () {
-                var result = $('#user-table').bootstrapTable('getSelections').map(a => a.id);
+                var result = $("#user-table")
+                    .bootstrapTable("getSelections")
+                    .map((a) => a.id);
                 confirmDialog(
                     "btndeluser",
                     "GeneralDeleteModal",
@@ -1427,45 +1709,71 @@ function move_header_elements() {
                     function () {
                         $.ajax({
                             method: "post",
-                            url: window.location.pathname + "/../../ajax/deleteuser",
-                            data: {"userid": result},
+                            url:
+                                window.location.pathname +
+                                "/../../ajax/deleteuser",
+                            data: { userid: result },
                             success: function (data) {
-                                selections = selections.filter((el) => !result.includes(el));
+                                selections = selections.filter(
+                                    (el) => !result.includes(el),
+                                );
                                 handleListServerResponse(data);
                             },
                             error: function (data) {
-                                handleListServerResponse([{type: "danger", message: data.responseText}])
+                                handleListServerResponse([
+                                    {
+                                        type: "danger",
+                                        message: data.responseText,
+                                    },
+                                ]);
                             },
                         });
-                    }
+                    },
                 );
             });
         }
     }
 }
 
-function handleListServerResponse (data) {
+function handleListServerResponse(data) {
     $("#flash_success").remove();
     $("#flash_danger").remove();
     if (!jQuery.isEmptyObject(data)) {
-        data.forEach(function(item) {
-            $(".navbar").after('<div class="row-fluid text-center">' +
-                '<div id="flash_' + item.type + '" class="alert alert-' + item.type + '">' + item.message + '</div>' +
-                '</div>');
+        data.forEach(function (item) {
+            $(".navbar").after(
+                '<div class="row-fluid text-center">' +
+                    '<div id="flash_' +
+                    item.type +
+                    '" class="alert alert-' +
+                    item.type +
+                    '">' +
+                    item.message +
+                    "</div>" +
+                    "</div>",
+            );
         });
     }
-    $("#user-table").bootstrapTable("refresh");
+
+    // Refresh whichever table is present on the current page.
+    if ($("#books-table").length) {
+        $("#books-table").bootstrapTable("refresh");
+    }
+    if ($("#user-table").length) {
+        $("#user-table").bootstrapTable("refresh");
+    }
 }
 
 function checkboxChange(checkbox, userId, field, field_index) {
     $.ajax({
         method: "post",
         url: getPath() + "/ajax/editlistusers/" + field,
-        data: {"pk": userId, "field_index": field_index, "value": checkbox.checked},
-        error: function(data) {
-            handleListServerResponse([{type:"danger", message:data.responseText}])
+        data: { pk: userId, field_index: field_index, value: checkbox.checked },
+        error: function (data) {
+            handleListServerResponse([
+                { type: "danger", message: data.responseText },
+            ]);
         },
-        success: handleListServerResponse
+        success: handleListServerResponse,
     });
 }
 
@@ -1475,81 +1783,117 @@ function BookCheckboxChange(checkbox, userId, field) {
     $.ajax({
         method: "post",
         url: getPath() + "/ajax/editbooks/" + field,
-        data: {"pk": userId, "value": value},
-        error: function(data) {
-            element.checked = !element.checked;
-            handleListServerResponse([{type:"danger", message:data.responseText}])
+        data: {
+            pk: userId,
+            value: value,
+            csrf_token: $("input[name='csrf_token']").val(),
         },
-        success: handleListServerResponse
+        error: function (data) {
+            element.checked = !element.checked;
+            handleListServerResponse([
+                { type: "danger", message: data.responseText },
+            ]);
+        },
+        success: function (data) {
+            handleListServerResponse(data);
+            if (typeof window.refreshShelfCountPills === "function") {
+                window.refreshShelfCountPills();
+            }
+        },
     });
 }
 
-
 function selectHeader(element, field) {
     if (element.value !== "None") {
-        confirmDialog(element.id, "GeneralChangeModal", 0, function () {
-            var result = $('#user-table').bootstrapTable('getSelections').map(a => a.id);
-            $.ajax({
-                method: "post",
-                url: window.location.pathname + "/../../ajax/editlistusers/" + field,
-                data: {"pk": result, "value": element.value},
-                error: function (data) {
-                    handleListServerResponse([{type:"danger", message:data.responseText}])
-                },
-                success: handleListServerResponse,
-            });
-        },function() {
-            $(element).prop("selectedIndex", 0);
-        });
+        confirmDialog(
+            element.id,
+            "GeneralChangeModal",
+            0,
+            function () {
+                var result = $("#user-table")
+                    .bootstrapTable("getSelections")
+                    .map((a) => a.id);
+                $.ajax({
+                    method: "post",
+                    url:
+                        window.location.pathname +
+                        "/../../ajax/editlistusers/" +
+                        field,
+                    data: { pk: result, value: element.value },
+                    error: function (data) {
+                        handleListServerResponse([
+                            { type: "danger", message: data.responseText },
+                        ]);
+                    },
+                    success: handleListServerResponse,
+                });
+            },
+            function () {
+                $(element).prop("selectedIndex", 0);
+            },
+        );
     }
 }
 
 function checkboxHeader(CheckboxState, field, field_index) {
-    confirmDialog(field, "GeneralChangeModal", 0, function() {
-        var result = $('#user-table').bootstrapTable('getSelections').map(a => a.id);
+    confirmDialog(
+        field,
+        "GeneralChangeModal",
+        0,
+        function () {
+            var result = $("#user-table")
+                .bootstrapTable("getSelections")
+                .map((a) => a.id);
+            $.ajax({
+                method: "post",
+                url:
+                    window.location.pathname +
+                    "/../../ajax/editlistusers/" +
+                    field,
+                data: {
+                    pk: result,
+                    field_index: field_index,
+                    value: CheckboxState,
+                },
+                error: function (data) {
+                    handleListServerResponse([
+                        { type: "danger", message: data.responseText },
+                    ]);
+                },
+                success: function (data) {
+                    handleListServerResponse(data, true);
+                },
+            });
+        },
+        function () {
+            $("input:radio.check_head:checked").each(function () {
+                $(this).prop("checked", false);
+            });
+        },
+    );
+}
+
+function deleteUser(a, id) {
+    confirmDialog("btndeluser", "GeneralDeleteModal", 0, function () {
         $.ajax({
             method: "post",
-            url: window.location.pathname + "/../../ajax/editlistusers/" + field,
-            data: {"pk": result, "field_index": field_index, "value": CheckboxState},
-            error: function (data) {
-                handleListServerResponse([{type:"danger", message:data.responseText}])
-            },
+            url: window.location.pathname + "/../../ajax/deleteuser",
+            data: { userid: id },
             success: function (data) {
-                handleListServerResponse (data, true)
+                userId = parseInt(id, 10);
+                selections = selections.filter((item) => item !== userId);
+                handleListServerResponse(data);
             },
-        });
-    },function() {
-        $("input:radio.check_head:checked").each(function() {
-            $(this).prop('checked', false);
+            error: function (data) {
+                handleListServerResponse([
+                    { type: "danger", message: data.responseText },
+                ]);
+            },
         });
     });
 }
 
-function deleteUser(a,id){
-    confirmDialog(
-    "btndeluser",
-        "GeneralDeleteModal",
-        0,
-        function() {
-            $.ajax({
-                method:"post",
-                url: window.location.pathname + "/../../ajax/deleteuser",
-                data: {"userid":id},
-                success: function (data) {
-                    userId = parseInt(id, 10);
-                    selections = selections.filter(item => item !== userId);
-                    handleListServerResponse(data);
-                },
-                error: function (data) {
-                    handleListServerResponse([{type:"danger", message:data.responseText}])
-                },
-            });
-        }
-    );
-}
-
-function queryParams(params)
-{
+function queryParams(params) {
     params.state = JSON.stringify(selections);
     return params;
 }
@@ -1558,17 +1902,17 @@ function storeLocation() {
     window.sessionStorage.setItem("back", window.location.pathname);
 }
 
-function user_handle (userId) {
+function user_handle(userId) {
     $.ajax({
-        method:"post",
+        method: "post",
         url: window.location.pathname + "/../../ajax/deleteuser",
-        data: {"userid":userId}
+        data: { userid: userId },
     });
     $("#user-table").bootstrapTable("refresh");
 }
 
 function shorten_html(value, response) {
-    if(value) {
+    if (value) {
         $(this).html("[...]");
         // value.split('\n').slice(0, 2).join("") +
     }

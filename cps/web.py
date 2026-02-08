@@ -58,13 +58,19 @@ from .cw_babel import get_available_locale
 from .usermanagement import login_required_if_no_ano
 from .kobo_sync_status import remove_synced_book
 from .render_template import render_title_template
-from .shelf import ensure_kobo_opt_in_shelf
+from .shelf import ensure_kobo_opt_in_shelf, get_user_kobo_collections_mode
 from .kobo_sync_status import change_archived_books
 from . import limiter
 from .services.worker import WorkerThread
 from .tasks_status import render_task_status
 from .usermanagement import user_login_required
 from .string_helper import strip_whitespaces
+
+
+"""Kobo collections mode helper.
+
+Use the implementation from cps.shelf to avoid circular imports with cps.kobo.
+"""
 
 
 feature_support = {
@@ -916,8 +922,21 @@ def books_list(data, sort_param, book_id, page):
 def books_table():
     visibility = current_user.view_settings.get('table', {})
     cc = calibre_db.get_cc_columns(config, filter_config_custom_read=True)
+
+    try:
+        kobo_collections_mode = get_user_kobo_collections_mode(current_user)
+    except Exception:
+        kobo_collections_mode = 'selected'
+
+    kobo_sync_hybrid = bool(
+        (not current_user.is_anonymous)
+        and feature_support.get('kobo')
+        and config.config_kobo_sync
+        and kobo_collections_mode == 'hybrid'
+    )
+
     return render_title_template('book_table.html', title=_("Books List"), cc=cc, page="book_table",
-                                 visiblility=visibility)
+                                 visiblility=visibility, kobo_sync_hybrid=kobo_sync_hybrid)
 
 
 @web.route("/ajax/listbooks")
@@ -984,10 +1003,44 @@ def list_books():
                                                                         *join)
 
     result = list()
+
+    try:
+        kobo_collections_mode = get_user_kobo_collections_mode(current_user)
+    except Exception:
+        kobo_collections_mode = 'selected'
+
+    kobo_sync_hybrid = bool(
+        (not current_user.is_anonymous)
+        and feature_support.get('kobo')
+        and config.config_kobo_sync
+        and kobo_collections_mode == 'hybrid'
+    )
+    kobo_opt_in_book_ids = set()
+    if kobo_sync_hybrid:
+        try:
+            shelf = ensure_kobo_opt_in_shelf(int(current_user.id))
+            shelf_id = getattr(shelf, 'id', None)
+            if shelf_id is not None:
+                entry_book_ids = [entry[0].id for entry in entries if entry and entry[0] is not None]
+                if entry_book_ids:
+                    kobo_opt_in_book_ids = set(
+                        row[0]
+                        for row in ub.session.query(ub.BookShelf.book_id)
+                        .filter(
+                            ub.BookShelf.shelf == shelf_id,
+                            ub.BookShelf.book_id.in_(entry_book_ids),
+                        )
+                        .all()
+                    )
+        except Exception as ex:
+            log.debug("list_books: failed to compute Kobo Sync shelf membership: %s", ex)
+
     for entry in entries:
         val = entry[0]
         val.is_archived = entry[1] is True
         val.read_status = entry[2] == ub.ReadBook.STATUS_FINISHED
+        if kobo_sync_hybrid:
+            val.kobo_sync = val.id in kobo_opt_in_book_ids
         for lang_index in range(0, len(val.languages)):
             val.languages[lang_index].language_name = isoLanguages.get_language_name(get_locale(), val.languages[
                 lang_index].lang_code)
@@ -1694,6 +1747,18 @@ def change_profile(kobo_support, hardcover_support, local_oauth_check, oauth_sta
         # Create the opt-in shelf when switching to hybrid mode
         if current_user.kobo_sync_collections_mode == "hybrid":
             ensure_kobo_opt_in_shelf(current_user.id)
+
+        if kobo_support and "kobo_remove_behavior" in to_save:
+            remove_behavior = (
+                to_save.get("kobo_remove_behavior", current_user.kobo_remove_behavior)
+                or "archive"
+            ).strip()
+            if remove_behavior == "unsync":
+                remove_behavior = "unsync_shelf"
+            if remove_behavior not in ["archive", "unsync_shelf"]:
+                remove_behavior = "archive"
+            current_user.kobo_remove_behavior = remove_behavior
+
         current_user.kobo_generated_shelves_sync = int(to_save.get("kobo_generated_shelves_sync") == "on") or 0
         current_user.kobo_generated_shelves_all_books = int(to_save.get("kobo_generated_shelves_all_books") == "on") or 0
         current_user.kobo_sync_empty_collections = int(to_save.get("kobo_sync_empty_collections") == "on") or 0

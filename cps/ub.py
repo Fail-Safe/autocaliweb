@@ -18,36 +18,56 @@
 #  along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import atexit
+import itertools
 import os
 import sys
-from datetime import datetime, timezone, timedelta
-import itertools
 import uuid
-from flask import session as flask_session
 from binascii import hexlify
+from datetime import datetime, timedelta, timezone
+
+from flask import session as flask_session
 
 from .cw_login import AnonymousUserMixin, current_user, user_logged_in
 
 try:
     from flask_dance.consumer.backend.sqla import OAuthConsumerMixin
+
     oauth_support = True
 except ImportError:
     # fails on flask-dance >1.3, due to renaming
     try:
         from flask_dance.consumer.storage.sqla import OAuthConsumerMixin
+
         oauth_support = True
     except ImportError:
         OAuthConsumerMixin = BaseException
         oauth_support = False
-from sqlalchemy import create_engine, exc, exists, event, text, Column, ForeignKey, Index, String, Integer, SmallInteger, Boolean, DateTime, Float, JSON
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    create_engine,
+    event,
+    exc,
+    exists,
+    text,
+)
 from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy.sql.expression import func
+from sqlalchemy.sql.expression import func, or_
+
 try:
     # Compatibility with sqlalchemy 2.0
     from sqlalchemy.orm import declarative_base
 except ImportError:
     from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import backref, relationship, sessionmaker, Session, scoped_session
+from sqlalchemy.orm import Session, backref, relationship, scoped_session, sessionmaker
 from werkzeug.security import generate_password_hash
 
 from . import constants, logger
@@ -68,13 +88,13 @@ def signal_store_user_session(object, user):
 
 
 def store_user_session():
-    _user = flask_session.get('_user_id', "")
-    _id = flask_session.get('_id', "")
-    _random = flask_session.get('_random', "")
-    if flask_session.get('_user_id', ""):
+    _user = flask_session.get("_user_id", "")
+    _id = flask_session.get("_id", "")
+    _random = flask_session.get("_random", "")
+    if flask_session.get("_user_id", ""):
         try:
             if not check_user_session(_user, _id, _random):
-                expiry = int((datetime.now()  + timedelta(days=31)).timestamp())
+                expiry = int((datetime.now() + timedelta(days=31)).timestamp())
                 user_session = User_Sessions(_user, _id, _random, expiry)
                 session.add(user_session)
                 session.commit()
@@ -91,8 +111,9 @@ def store_user_session():
 def delete_user_session(user_id, session_key):
     try:
         log.debug("Deleted session_key: " + session_key)
-        session.query(User_Sessions).filter(User_Sessions.user_id == user_id,
-                                            User_Sessions.session_key == session_key).delete()
+        session.query(User_Sessions).filter(
+            User_Sessions.user_id == user_id, User_Sessions.session_key == session_key
+        ).delete()
         session.commit()
     except (exc.OperationalError, exc.InvalidRequestError) as ex:
         session.rollback()
@@ -101,12 +122,17 @@ def delete_user_session(user_id, session_key):
 
 def check_user_session(user_id, session_key, random):
     try:
-        found = session.query(User_Sessions).filter(User_Sessions.user_id==user_id,
-                                                    User_Sessions.session_key==session_key,
-                                                    User_Sessions.random == random,
-                                                    ).one_or_none()
+        found = (
+            session.query(User_Sessions)
+            .filter(
+                User_Sessions.user_id == user_id,
+                User_Sessions.session_key == session_key,
+                User_Sessions.random == random,
+            )
+            .one_or_none()
+        )
         if found is not None:
-            new_expiry = int((datetime.now()  + timedelta(days=31)).timestamp())
+            new_expiry = int((datetime.now() + timedelta(days=31)).timestamp())
             if new_expiry - found.expiry > 86400:
                 found.expiry = new_expiry
                 session.merge(found)
@@ -120,11 +146,13 @@ def check_user_session(user_id, session_key, random):
 
 user_logged_in.connect(signal_store_user_session)
 
+
 def store_ids(result):
     ids = list()
     for element in result:
         ids.append(element.id)
     searched_ids[current_user.id] = ids
+
 
 def store_combo_ids(result):
     ids = list()
@@ -134,7 +162,6 @@ def store_combo_ids(result):
 
 
 class UserBase:
-
     @property
     def is_authenticated(self):
         return self.is_active
@@ -227,14 +254,14 @@ class UserBase:
             log.error_or_exception(e)
 
     def __repr__(self):
-        return '<User %r>' % self.name
+        return "<User %r>" % self.name
 
 
 # Baseclass for Users in Autocaliweb, settings which depend on certain users are stored here. It is derived from
 # User Base (all access methods are declared there)
 class User(UserBase, Base):
-    __tablename__ = 'user'
-    __table_args__ = {'sqlite_autoincrement': True}
+    __tablename__ = "user"
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True)
     name = Column(String(64), unique=True)
@@ -242,8 +269,8 @@ class User(UserBase, Base):
     role = Column(SmallInteger, default=constants.ROLE_USER)
     password = Column(String)
     kindle_mail = Column(String(120), default="")
-    shelf = relationship('Shelf', backref='user', lazy='dynamic', order_by='Shelf.name')
-    downloads = relationship('Downloads', backref='user', lazy='dynamic')
+    shelf = relationship("Shelf", backref="user", lazy="dynamic", order_by="Shelf.name")
+    downloads = relationship("Downloads", backref="user", lazy="dynamic")
     locale = Column(String(2), default="en")
     sidebar_view = Column(Integer, default=1)
     default_language = Column(String(3), default="all")
@@ -251,10 +278,19 @@ class User(UserBase, Base):
     allowed_tags = Column(String, default="")
     denied_column_value = Column(String, default="")
     allowed_column_value = Column(String, default="")
-    remote_auth_token = relationship('RemoteAuthToken', backref='user', lazy='dynamic')
+    remote_auth_token = relationship("RemoteAuthToken", backref="user", lazy="dynamic")
     view_settings = Column(JSON, default={})
     # Legacy field - replaced by kobo_sync_collections_mode, kept for migration
     kobo_only_shelves_sync = Column(Integer, default=0)
+
+    # Per-user Kobo setting: what to do when the device sends a DELETE (e.g., "Remove this book").
+    # Values:
+    #   "archive"        -> set ArchivedBook.is_archived = 1 (default / current behavior)
+    #   "unsync_shelf"   -> remove from the local-only "Kobo Sync" opt-in shelf (hybrid mode) + remove from sync state;
+    #                      do NOT archive/hide in ACW
+    # Legacy:
+    #   "unsync"         -> previous label for "do not archive"; treated as "unsync_shelf"
+    kobo_remove_behavior = Column(String(32), default="archive")
     kobo_plus = Column(Integer, default=0)
     kobo_overdrive = Column(Integer, default=0)
     kobo_audiobooks = Column(Integer, default=0)
@@ -273,7 +309,9 @@ class User(UserBase, Base):
     hardcover_token = Column(String, default="")
     auto_send_enabled = Column(Boolean, default=False)
 
+
 if oauth_support:
+
     class OAuth(OAuthConsumerMixin, Base):
         provider_user_id = Column(String(256))
         user_id = Column(Integer, ForeignKey(User.id))
@@ -281,7 +319,7 @@ if oauth_support:
 
 
 class OAuthProvider(Base):
-    __tablename__ = 'oauthProvider'
+    __tablename__ = "oauthProvider"
 
     id = Column(Integer, primary_key=True)
     provider_name = Column(String)
@@ -304,6 +342,7 @@ class OAuthProvider(Base):
 class Anonymous(AnonymousUserMixin, UserBase):
     def __init__(self):
         self.kobo_only_shelves_sync = None
+        self.kobo_remove_behavior = None
         self.kobo_plus = None
         self.kobo_overdrive = None
         self.kobo_audiobooks = None
@@ -323,11 +362,16 @@ class Anonymous(AnonymousUserMixin, UserBase):
         self.loadSettings()
 
     def loadSettings(self):
-        data = session.query(User).filter(User.role.op('&')(constants.ROLE_ANONYMOUS) == constants.ROLE_ANONYMOUS)\
-            .first()  # type: User
+        data = (
+            session.query(User)
+            .filter(
+                User.role.op("&")(constants.ROLE_ANONYMOUS) == constants.ROLE_ANONYMOUS
+            )
+            .first()
+        )  # type: User
         self.name = data.name
         self.role = data.role
-        self.id=data.id
+        self.id = data.id
         self.sidebar_view = data.sidebar_view
         self.default_language = data.default_language
         self.locale = data.locale
@@ -338,6 +382,7 @@ class Anonymous(AnonymousUserMixin, UserBase):
         self.allowed_column_value = data.allowed_column_value
         self.view_settings = data.view_settings
         self.kobo_only_shelves_sync = data.kobo_only_shelves_sync
+        self.kobo_remove_behavior = getattr(data, "kobo_remove_behavior", "archive")
         self.kobo_plus = data.kobo_plus
         self.kobo_overdrive = data.kobo_overdrive
         self.kobo_audiobooks = data.kobo_audiobooks
@@ -360,28 +405,28 @@ class Anonymous(AnonymousUserMixin, UserBase):
         return False
 
     def get_view_property(self, page, prop):
-        if 'view' in flask_session:
-            if not flask_session['view'].get(page):
+        if "view" in flask_session:
+            if not flask_session["view"].get(page):
                 return None
-            return flask_session['view'][page].get(prop)
+            return flask_session["view"][page].get(prop)
         return None
 
     def set_view_property(self, page, prop, value):
-        if 'view' not in flask_session:
-            flask_session['view'] = dict()
-        if not flask_session['view'].get(page):
-            flask_session['view'][page] = dict()
-        flask_session['view'][page][prop] = value
+        if "view" not in flask_session:
+            flask_session["view"] = dict()
+        if not flask_session["view"].get(page):
+            flask_session["view"][page] = dict()
+        flask_session["view"][page][prop] = value
+
 
 class User_Sessions(Base):
-    __tablename__ = 'user_session'
+    __tablename__ = "user_session"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     session_key = Column(String, default="")
     random = Column(String, default="")
     expiry = Column(Integer)
-
 
     def __init__(self, user_id, session_key, random, expiry):
         super().__init__()
@@ -393,48 +438,54 @@ class User_Sessions(Base):
 
 # Baseclass representing Shelfs in autocaliweb in app.db
 class Shelf(Base):
-    __tablename__ = 'shelf'
+    __tablename__ = "shelf"
 
     id = Column(Integer, primary_key=True)
     uuid = Column(String, default=lambda: str(uuid.uuid4()))
     name = Column(String)
     is_public = Column(Integer, default=0)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     kobo_sync = Column(Boolean, default=False)
-    books = relationship("BookShelf", backref="ub_shelf", cascade="all, delete-orphan", lazy="dynamic")
+    books = relationship(
+        "BookShelf", backref="ub_shelf", cascade="all, delete-orphan", lazy="dynamic"
+    )
     created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     def __repr__(self):
-        return '<Shelf %d:%r>' % (self.id, self.name)
+        return "<Shelf %d:%r>" % (self.id, self.name)
 
 
 # Baseclass representing Relationship between books and Shelfs in Autocaliweb in app.db (N:M)
 class BookShelf(Base):
-    __tablename__ = 'book_shelf_link'
+    __tablename__ = "book_shelf_link"
 
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer)
     order = Column(Integer)
-    shelf = Column(Integer, ForeignKey('shelf.id'))
+    shelf = Column(Integer, ForeignKey("shelf.id"))
     date_added = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
-        return '<Book %r>' % self.id
+        return "<Book %r>" % self.id
 
 
 # This table keeps track of deleted Shelves so that deletes can be propagated to any paired Kobo device.
 class ShelfArchive(Base):
-    __tablename__ = 'shelf_archive'
+    __tablename__ = "shelf_archive"
 
     id = Column(Integer, primary_key=True)
     uuid = Column(String)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ReadBook(Base):
-    __tablename__ = 'book_read_link'
+    __tablename__ = "book_read_link"
 
     STATUS_UNREAD = 0
     STATUS_FINISHED = 1
@@ -442,86 +493,119 @@ class ReadBook(Base):
 
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer, unique=False)
-    user_id = Column(Integer, ForeignKey('user.id'), unique=False)
+    user_id = Column(Integer, ForeignKey("user.id"), unique=False)
     read_status = Column(Integer, unique=False, default=STATUS_UNREAD, nullable=False)
-    kobo_reading_state = relationship("KoboReadingState", uselist=False,
-                                      primaryjoin="and_(ReadBook.user_id == foreign(KoboReadingState.user_id), "
-                                                  "ReadBook.book_id == foreign(KoboReadingState.book_id))",
-                                      cascade="all",
-                                      backref=backref("book_read_link",
-                                                      uselist=False))
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    kobo_reading_state = relationship(
+        "KoboReadingState",
+        uselist=False,
+        primaryjoin="and_(ReadBook.user_id == foreign(KoboReadingState.user_id), "
+        "ReadBook.book_id == foreign(KoboReadingState.book_id))",
+        cascade="all",
+        backref=backref("book_read_link", uselist=False),
+    )
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     last_time_started_reading = Column(DateTime, nullable=True)
     times_started_reading = Column(Integer, default=0, nullable=False)
 
 
 class Bookmark(Base):
-    __tablename__ = 'bookmark'
+    __tablename__ = "bookmark"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     book_id = Column(Integer)
-    format = Column(String(collation='NOCASE'))
+    format = Column(String(collation="NOCASE"))
     bookmark_key = Column(String)
 
 
 # Baseclass representing books that are archived on the user's Kobo device.
 class ArchivedBook(Base):
-    __tablename__ = 'archived_book'
+    __tablename__ = "archived_book"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     book_id = Column(Integer)
     is_archived = Column(Boolean, unique=False)
     last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class KoboSyncedBooks(Base):
-    __tablename__ = 'kobo_synced_books'
+    __tablename__ = "kobo_synced_books"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     book_id = Column(Integer)
 
 
 class KoboTagSyncState(Base):
-    __tablename__ = 'kobo_tag_sync_state'
+    __tablename__ = "kobo_tag_sync_state"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user.id'), unique=True)
+    user_id = Column(Integer, ForeignKey("user.id"), unique=True)
 
-    generated_selector = Column(String, default='')
+    generated_selector = Column(String, default="")
     include_generated_in_selected = Column(Boolean, default=False)
-    collections_mode = Column(String, default='')
+    collections_mode = Column(String, default="")
     sync_all_generated = Column(Boolean, default=False)
 
     # Set true when the server needs to re-emit all generated collections at least once
     # (e.g., user enabled generated shelves in selected mode).
     force_resync_generated = Column(Boolean, default=False)
 
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
 
 # The Kobo ReadingState API keeps track of 4 timestamped entities:
 #   ReadingState, StatusInfo, Statistics, CurrentBookmark
 # Which we map to the following 4 tables:
 #   KoboReadingState, ReadBook, KoboStatistics and KoboBookmark
 class KoboReadingState(Base):
-    __tablename__ = 'kobo_reading_state'
+    __tablename__ = "kobo_reading_state"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     book_id = Column(Integer)
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    priority_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    current_bookmark = relationship("KoboBookmark", uselist=False, backref="kobo_reading_state", cascade="all, delete")
-    statistics = relationship("KoboStatistics", uselist=False, backref="kobo_reading_state", cascade="all, delete")
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    priority_timestamp = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    current_bookmark = relationship(
+        "KoboBookmark",
+        uselist=False,
+        backref="kobo_reading_state",
+        cascade="all, delete",
+    )
+    statistics = relationship(
+        "KoboStatistics",
+        uselist=False,
+        backref="kobo_reading_state",
+        cascade="all, delete",
+    )
 
 
 class KoboBookmark(Base):
-    __tablename__ = 'kobo_bookmark'
+    __tablename__ = "kobo_bookmark"
 
     id = Column(Integer, primary_key=True)
-    kobo_reading_state_id = Column(Integer, ForeignKey('kobo_reading_state.id'))
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    kobo_reading_state_id = Column(Integer, ForeignKey("kobo_reading_state.id"))
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     location_source = Column(String)
     location_type = Column(String)
     location_value = Column(String)
@@ -530,36 +614,46 @@ class KoboBookmark(Base):
 
 
 class KoboStatistics(Base):
-    __tablename__ = 'kobo_statistics'
+    __tablename__ = "kobo_statistics"
 
     id = Column(Integer, primary_key=True)
-    kobo_reading_state_id = Column(Integer, ForeignKey('kobo_reading_state.id'))
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    kobo_reading_state_id = Column(Integer, ForeignKey("kobo_reading_state.id"))
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     remaining_time_minutes = Column(Integer)
     spent_reading_minutes = Column(Integer)
 
+
 class KoboAnnotationSync(Base):
     """Track which Kobo annotations have been synced to external services (e.g., Hardcover)."""
-    __tablename__ = 'kobo_annotation_sync'
+
+    __tablename__ = "kobo_annotation_sync"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user.id'), nullable=False)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
     annotation_id = Column(String, nullable=False)  # Kobo annotation UUID
     book_id = Column(Integer, nullable=False)  # Calibre book ID
     synced_to_hardcover = Column(Boolean, default=False)
     hardcover_journal_id = Column(Integer)  # Hardcover journal entry ID
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_synced = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_synced = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     highlighted_text = Column(String, nullable=True)
     highlight_color = Column(String, nullable=True)
     note_text = Column(String, nullable=True)
 
     __table_args__ = (
-        Index('ix_kobo_annotation_sync_user_annotation', 'user_id', 'annotation_id'),
+        Index("ix_kobo_annotation_sync_user_annotation", "user_id", "annotation_id"),
     )
 
     def __repr__(self):
-        return f'<KoboAnnotationSync annotation_id={self.annotation_id} book_id={self.book_id}>'
+        return f"<KoboAnnotationSync annotation_id={self.annotation_id} book_id={self.book_id}>"
 
 
 class GeneratedShelfKoboSync(Base):
@@ -568,39 +662,55 @@ class GeneratedShelfKoboSync(Base):
     Generated shelves are computed dynamically from Calibre metadata and don't exist in the
     ub.Shelf table. This table stores the user's kobo_sync preference for each generated shelf.
     """
-    __tablename__ = 'generated_shelf_kobo_sync'
+
+    __tablename__ = "generated_shelf_kobo_sync"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('user.id'), nullable=False)
-    source = Column(String, nullable=False)  # e.g., "authors", "series", "tags", "publishers", "languages"
-    value = Column(String, nullable=False)   # e.g., "Brandon Sanderson", "The Expanse"
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
+    source = Column(
+        String, nullable=False
+    )  # e.g., "authors", "series", "tags", "publishers", "languages"
+    value = Column(String, nullable=False)  # e.g., "Brandon Sanderson", "The Expanse"
     kobo_sync = Column(Boolean, default=False)
     created = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_modified = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_modified = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     __table_args__ = (
-        Index('ix_generated_shelf_kobo_sync_user_source_value', 'user_id', 'source', 'value', unique=True),
+        Index(
+            "ix_generated_shelf_kobo_sync_user_source_value",
+            "user_id",
+            "source",
+            "value",
+            unique=True,
+        ),
     )
 
     def __repr__(self):
-        return f'<GeneratedShelfKoboSync user={self.user_id} source={self.source} value={self.value} sync={self.kobo_sync}>'
+        return f"<GeneratedShelfKoboSync user={self.user_id} source={self.source} value={self.value} sync={self.kobo_sync}>"
 
 
 class HardcoverBookBlacklist(Base):
     """Track book-level blacklisting for hardcover sync features."""
-    __tablename__ = 'hardcover_book_blacklist'
+
+    __tablename__ = "hardcover_book_blacklist"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     book_id = Column(Integer, nullable=False, unique=True)  # Calibre book ID
     blacklist_annotations = Column(Boolean, default=False)  # Block annotation syncing
-    blacklist_reading_progress = Column(Boolean, default=False)  # Block reading progress syncing
+    blacklist_reading_progress = Column(
+        Boolean, default=False
+    )  # Block reading progress syncing
 
     def __repr__(self):
-        return f'<HardcoverBookBlacklist book_id={self.book_id} annotations={self.blacklist_annotations} progress={self.blacklist_reading_progress}>'
+        return f"<HardcoverBookBlacklist book_id={self.book_id} annotations={self.blacklist_annotations} progress={self.blacklist_reading_progress}>"
 
 
 # Updates the last_modified timestamp in the KoboReadingState table if any of its children tables are modified.
-@event.listens_for(Session, 'before_flush')
+@event.listens_for(Session, "before_flush")
 def receive_before_flush(session, flush_context, instances):
     for change in itertools.chain(session.new, session.dirty):
         if isinstance(change, (ReadBook, KoboStatistics, KoboBookmark)):
@@ -609,41 +719,45 @@ def receive_before_flush(session, flush_context, instances):
     # Maintain the last_modified_bit for the Shelf table.
     for change in itertools.chain(session.new, session.deleted):
         if isinstance(change, BookShelf):
-            change.ub_shelf.last_modified = datetime.now(timezone.utc)
+            if getattr(change, "ub_shelf", None) is not None:
+                change.ub_shelf.last_modified = datetime.now(timezone.utc)
 
 
 # Baseclass representing Downloads from autocaliweb in app.db
 class Downloads(Base):
-    __tablename__ = 'downloads'
+    __tablename__ = "downloads"
 
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
 
     def __repr__(self):
-        return '<Download %r' % self.book_id
+        return "<Download %r" % self.book_id
 
 
 class KOSyncProgress(Base):
-    __tablename__ = 'kosync_progress'
+    __tablename__ = "kosync_progress"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('user.id'), nullable=False)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
     document = Column(String, nullable=False)
     progress = Column(String, nullable=False)
     percentage = Column(Float, nullable=False)
     device = Column(String, nullable=False)
     device_id = Column(String)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    timestamp = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     def __repr__(self):
-        return '<KOSyncProgress %r - %r>' % (self.user_id, self.document)
-
+        return "<KOSyncProgress %r - %r>" % (self.user_id, self.document)
 
 
 # Baseclass representing allowed domains for registration
 class Registration(Base):
-    __tablename__ = 'registration'
+    __tablename__ = "registration"
 
     id = Column(Integer, primary_key=True)
     domain = Column(String)
@@ -654,30 +768,30 @@ class Registration(Base):
 
 
 class RemoteAuthToken(Base):
-    __tablename__ = 'remote_auth_token'
+    __tablename__ = "remote_auth_token"
 
     id = Column(Integer, primary_key=True)
     auth_token = Column(String, unique=True)
-    user_id = Column(Integer, ForeignKey('user.id'))
+    user_id = Column(Integer, ForeignKey("user.id"))
     verified = Column(Boolean, default=False)
     expiration = Column(DateTime)
     token_type = Column(Integer, default=0)
 
     def __init__(self):
         super().__init__()
-        self.auth_token = (hexlify(os.urandom(4))).decode('utf-8')
+        self.auth_token = (hexlify(os.urandom(4))).decode("utf-8")
         self.expiration = datetime.now() + timedelta(minutes=10)  # 10 min from now
 
     def __repr__(self):
-        return '<Token %r>' % self.id
+        return "<Token %r>" % self.id
 
 
 def filename(context):
-    file_format = context.get_current_parameters()['format']
-    if file_format == 'jpeg':
-        return context.get_current_parameters()['uuid'] + '.jpg'
+    file_format = context.get_current_parameters()["format"]
+    if file_format == "jpeg":
+        return context.get_current_parameters()["uuid"] + ".jpg"
     else:
-        return context.get_current_parameters()['uuid'] + '.' + file_format
+        return context.get_current_parameters()["uuid"] + "." + file_format
 
 
 def default_expiration():
@@ -685,12 +799,12 @@ def default_expiration():
 
 
 class Thumbnail(Base):
-    __tablename__ = 'thumbnail'
+    __tablename__ = "thumbnail"
 
     id = Column(Integer, primary_key=True)
     entity_id = Column(Integer)
     uuid = Column(String, default=lambda: str(uuid.uuid4()), unique=True)
-    format = Column(String, default='jpeg')
+    format = Column(String, default="jpeg")
     type = Column(SmallInteger, default=constants.THUMBNAIL_TYPE_COVER)
     resolution = Column(SmallInteger, default=constants.COVER_THUMBNAIL_SMALL)
     filename = Column(String, default=filename)
@@ -708,10 +822,12 @@ def add_missing_tables(engine, _session):
     # (No Alembic here; create indexes opportunistically.)
     try:
         with engine.connect() as conn:
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_thumbnail_lookup "
-                "ON thumbnail (type, entity_id, resolution, format, expiration, generated_at, id)"
-            ))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_thumbnail_lookup "
+                    "ON thumbnail (type, entity_id, resolution, format, expiration, generated_at, id)"
+                )
+            )
     except Exception:
         # Non-fatal: index creation can fail on read-only DBs.
         pass
@@ -728,7 +844,11 @@ def add_missing_tables(engine, _session):
             result = conn.execute(text("PRAGMA table_info(kobo_tag_sync_state)"))
             columns = [row[1] for row in result.fetchall()]
             if "sync_all_generated" not in columns:
-                conn.execute(text("ALTER TABLE kobo_tag_sync_state ADD COLUMN sync_all_generated BOOLEAN DEFAULT 0"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE kobo_tag_sync_state ADD COLUMN sync_all_generated BOOLEAN DEFAULT 0"
+                    )
+                )
                 conn.commit()
     except Exception:
         # Non-fatal: DB might be read-only
@@ -764,10 +884,12 @@ def migrate_registration_table(engine, _session):
         if not cnt:
             with engine.connect() as conn:
                 trans = conn.begin()
-                conn.execute(text("insert into registration (domain, allow) values('%.%',1)"))
+                conn.execute(
+                    text("insert into registration (domain, allow) values('%.%',1)")
+                )
                 trans.commit()
     except exc.OperationalError:  # Database is not writeable
-        print('Settings database is not writeable. Exiting...')
+        print("Settings database is not writeable. Exiting...")
         sys.exit(2)
 
 
@@ -782,65 +904,70 @@ def migrate_user_session_table(engine, _session):
             conn.execute(text("ALTER TABLE user_session ADD column 'expiry' Integer"))
             trans.commit()
 
+
 def migrate_user_table(engine, _session):
     with engine.connect() as conn:
         needed = [
-            ('name', "VARCHAR(64) NOT NULL"),
-            ('email', "VARCHAR(120) NOT NULL DEFAULT ''"),
-            ('role', "SMALLINT NOT NULL DEFAULT 0"),
-            ('password', "VARCHAR(255) NOT NULL"),
-            ('kindle_mail', "VARCHAR(120) NOT NULL DEFAULT ''"),
-            ('shelf', "INTEGER NOT NULL DEFAULT 0"),
-            ('downloads', "INTEGER NOT NULL DEFAULT 0"),
-            ('locale', "VARCHAR(2) NOT NULL DEFAULT 'en'"),
-            ('sidebar_view', "INTEGER NOT NULL DEFAULT 1"),
-            ('default_language', "VARCHAR(3) NOT NULL DEFAULT 'all'"),
-            ('denied_tags', "VARCHAR(255) NOT NULL DEFAULT ''"),
-            ('allowed_tags', "VARCHAR(255) NOT NULL DEFAULT ''"),
-            ('denied_column_value', "VARCHAR(255) NOT NULL DEFAULT ''"),
-            ('allowed_column_value', "VARCHAR(255) NOT NULL DEFAULT ''"),
-            ('remote_auth_token', "INTEGER NOT NULL DEFAULT 0"),
-            ('view_settings', "JSON NOT NULL DEFAULT '{}'"),
-            ('kobo_only_shelves_sync', "INTEGER NOT NULL DEFAULT 0"),
-            ('kobo_plus', "INTEGER NOT NULL DEFAULT 0"),
-            ('kobo_overdrive', "INTEGER NOT NULL DEFAULT 0"),
-            ('kobo_audiobooks', "INTEGER NOT NULL DEFAULT 0"),
-            ('kobo_instapaper', "INTEGER NOT NULL DEFAULT 0"),
-            ('kobo_sync_collections_mode', "VARCHAR(32) NOT NULL DEFAULT 'selected'"),
-            ('kobo_generated_shelves_sync', "BOOLEAN NOT NULL DEFAULT 0"),
-            ('kobo_generated_shelves_all_books', "BOOLEAN NOT NULL DEFAULT 0"),
-            ('kobo_sync_empty_collections', "BOOLEAN NOT NULL DEFAULT 0"),
-            ('kobo_sync_item_limit', "INTEGER NOT NULL DEFAULT 100"),
-            ('hardcover_token', "VARCHAR(255) NOT NULL DEFAULT ''"),
-            ('auto_send_enabled', "BOOLEAN NOT NULL DEFAULT 0"),
+            ("name", "VARCHAR(64) NOT NULL"),
+            ("email", "VARCHAR(120) NOT NULL DEFAULT ''"),
+            ("role", "SMALLINT NOT NULL DEFAULT 0"),
+            ("password", "VARCHAR(255) NOT NULL"),
+            ("kindle_mail", "VARCHAR(120) NOT NULL DEFAULT ''"),
+            ("shelf", "INTEGER NOT NULL DEFAULT 0"),
+            ("downloads", "INTEGER NOT NULL DEFAULT 0"),
+            ("locale", "VARCHAR(2) NOT NULL DEFAULT 'en'"),
+            ("sidebar_view", "INTEGER NOT NULL DEFAULT 1"),
+            ("default_language", "VARCHAR(3) NOT NULL DEFAULT 'all'"),
+            ("denied_tags", "VARCHAR(255) NOT NULL DEFAULT ''"),
+            ("allowed_tags", "VARCHAR(255) NOT NULL DEFAULT ''"),
+            ("denied_column_value", "VARCHAR(255) NOT NULL DEFAULT ''"),
+            ("allowed_column_value", "VARCHAR(255) NOT NULL DEFAULT ''"),
+            ("remote_auth_token", "INTEGER NOT NULL DEFAULT 0"),
+            ("view_settings", "JSON NOT NULL DEFAULT '{}'"),
+            ("kobo_only_shelves_sync", "INTEGER NOT NULL DEFAULT 0"),
+            ("kobo_remove_behavior", "VARCHAR(32) NOT NULL DEFAULT 'archive'"),
+            ("kobo_plus", "INTEGER NOT NULL DEFAULT 0"),
+            ("kobo_overdrive", "INTEGER NOT NULL DEFAULT 0"),
+            ("kobo_audiobooks", "INTEGER NOT NULL DEFAULT 0"),
+            ("kobo_instapaper", "INTEGER NOT NULL DEFAULT 0"),
+            ("kobo_sync_collections_mode", "VARCHAR(32) NOT NULL DEFAULT 'selected'"),
+            ("kobo_generated_shelves_sync", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("kobo_generated_shelves_all_books", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("kobo_sync_empty_collections", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("kobo_sync_item_limit", "INTEGER NOT NULL DEFAULT 100"),
+            ("hardcover_token", "VARCHAR(255) NOT NULL DEFAULT ''"),
+            ("auto_send_enabled", "BOOLEAN NOT NULL DEFAULT 0"),
         ]
         for col_name, col_def in needed:
             exists = conn.execute(text("PRAGMA table_info(user)")).fetchall()
             if not any(row[1] == col_name for row in exists):
                 conn.execute(text(f"ALTER TABLE user ADD COLUMN {col_name} {col_def}"))
 
+
 def migrate_oauth_table(engine, _session):
     with engine.connect() as conn:
         needed = [
-            ('id', "INTEGER PRIMARY KEY AUTOINCREMENT"),
-            ('provider_name', "VARCHAR(255) NOT NULL"),
-            ('oauth_client_id', "VARCHAR(255)"),
-            ('oauth_client_secret', "VARCHAR(255)"),
-            ('oauth_base_url', "VARCHAR(255)"),
-            ('oauth_auth_url', "VARCHAR(255)"),
-            ('oauth_token_url', "VARCHAR(255)"),
-            ('oauth_userinfo_url', "VARCHAR(255)"),
-            ('scope', "VARCHAR(255) NOT NULL DEFAULT 'openid profile email'"),
-            ('username_mapper', "VARCHAR(255) NOT NULL DEFAULT 'preferred_username'"),
-            ('email_mapper', "VARCHAR(255) NOT NULL DEFAULT 'email'"),
-            ('login_button', "VARCHAR(255) NOT NULL DEFAULT 'OpenID Connect'"),
-            ('metadata_url', "VARCHAR(255)"),
-            ('active', "BOOLEAN NOT NULL DEFAULT 0"),
+            ("id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+            ("provider_name", "VARCHAR(255) NOT NULL"),
+            ("oauth_client_id", "VARCHAR(255)"),
+            ("oauth_client_secret", "VARCHAR(255)"),
+            ("oauth_base_url", "VARCHAR(255)"),
+            ("oauth_auth_url", "VARCHAR(255)"),
+            ("oauth_token_url", "VARCHAR(255)"),
+            ("oauth_userinfo_url", "VARCHAR(255)"),
+            ("scope", "VARCHAR(255) NOT NULL DEFAULT 'openid profile email'"),
+            ("username_mapper", "VARCHAR(255) NOT NULL DEFAULT 'preferred_username'"),
+            ("email_mapper", "VARCHAR(255) NOT NULL DEFAULT 'email'"),
+            ("login_button", "VARCHAR(255) NOT NULL DEFAULT 'OpenID Connect'"),
+            ("metadata_url", "VARCHAR(255)"),
+            ("active", "BOOLEAN NOT NULL DEFAULT 0"),
         ]
         for col_name, col_def in needed:
             exists = conn.execute(text("PRAGMA table_info(oauthProvider)")).fetchall()
             if not any(row[1] == col_name for row in exists):
-                conn.execute(text(f"ALTER TABLE oauthProvider ADD COLUMN {col_name} {col_def}"))
+                conn.execute(
+                    text(f"ALTER TABLE oauthProvider ADD COLUMN {col_name} {col_def}")
+                )
 
 
 # Migrate database to current version, has to be updated after every database change. Currently, migration from
@@ -859,17 +986,23 @@ def clean_database(_session):
     # Remove expired remote login tokens
     now = datetime.now()
     try:
-        _session.query(RemoteAuthToken).filter(now > RemoteAuthToken.expiration).\
-            filter(RemoteAuthToken.token_type != 1).delete()
+        _session.query(RemoteAuthToken).filter(now > RemoteAuthToken.expiration).filter(
+            RemoteAuthToken.token_type != 1
+        ).delete()
         _session.commit()
     except exc.OperationalError:  # Database is not writeable
-        print('Settings database is not writeable. Exiting...')
+        print("Settings database is not writeable. Exiting...")
         sys.exit(2)
 
 
 # Save downloaded books per user in autocaliweb's own database
 def update_download(book_id, user_id):
-    check = session.query(Downloads).filter(Downloads.user_id == user_id).filter(Downloads.book_id == book_id).first()
+    check = (
+        session.query(Downloads)
+        .filter(Downloads.user_id == user_id)
+        .filter(Downloads.book_id == book_id)
+        .first()
+    )
 
     if not check:
         new_download = Downloads(user_id=user_id, book_id=book_id)
@@ -888,25 +1021,26 @@ def delete_download(book_id):
     except exc.OperationalError:
         session.rollback()
 
+
 # Generate user Guest (translated text), as anonymous user, no rights
 def create_anonymous_user(_session):
-    existing_guest = _session.query(User).filter(User.email == 'no@email').first()
+    existing_guest = _session.query(User).filter(User.email == "no@email").first()
     if existing_guest:
         log.info("Anonymous user already exists, skipping creation")
         return
 
     user = User()
     user.name = "Guest"
-    user.email = 'no@email'
+    user.email = "no@email"
     user.role = constants.ROLE_ANONYMOUS
-    user.password = ''
+    user.password = ""
 
     _session.add(user)
     try:
         _session.commit()
-    except Exception as e:
+    except Exception:
         _session.rollback()
-        log.error_or_exception(e)
+        log.error_or_exception(ex)
 
 
 def generate_fips_safe_password_hash(password):
@@ -916,11 +1050,7 @@ def generate_fips_safe_password_hash(password):
         if "digest" not in str(e).lower():
             raise
         # FIPS fallback
-        return generate_password_hash(
-            password,
-            method="pbkdf2:sha256",
-            salt_length=16
-        )
+        return generate_password_hash(password, method="pbkdf2:sha256", salt_length=16)
 
 
 # Generate User admin with admin123 password, and access to everything
@@ -940,9 +1070,10 @@ def create_admin_user(_session):
         _session.rollback()
         log.error_or_exception(e)
 
+
 def init_db_thread():
     global app_DB_path
-    engine = create_engine('sqlite:///{0}'.format(app_DB_path), echo=False)
+    engine = create_engine("sqlite:///{0}".format(app_DB_path), echo=False)
 
     Session = scoped_session(sessionmaker())
     Session.configure(bind=engine)
@@ -955,7 +1086,7 @@ def init_db(app_db_path):
     global app_DB_path
 
     app_DB_path = app_db_path
-    engine = create_engine('sqlite:///{0}'.format(app_db_path), echo=False)
+    engine = create_engine("sqlite:///{0}".format(app_db_path), echo=False)
 
     Session = scoped_session(sessionmaker())
     Session.configure(bind=engine)
@@ -970,16 +1101,22 @@ def init_db(app_db_path):
         create_admin_user(session)
         create_anonymous_user(session)
 
+
 def password_change(user_credentials=None):
     if user_credentials:
-        username, password = user_credentials.split(':', 1)
-        user = session.query(User).filter(func.lower(User.name) == username.lower()).first()
+        username, password = user_credentials.split(":", 1)
+        user = (
+            session.query(User)
+            .filter(func.lower(User.name) == username.lower())
+            .first()
+        )
         if user:
             if not password:
                 print("Empty password is not allowed")
                 sys.exit(4)
             try:
                 from .helper import valid_password
+
                 user.password = generate_password_hash(valid_password(password))
             except Exception:
                 print("Password doesn't comply with password validation rules")
@@ -996,7 +1133,7 @@ def password_change(user_credentials=None):
 
 
 def get_new_session_instance():
-    new_engine = create_engine('sqlite:///{0}'.format(app_DB_path), echo=False)
+    new_engine = create_engine("sqlite:///{0}".format(app_DB_path), echo=False)
     new_session = scoped_session(sessionmaker())
     new_session.configure(bind=new_engine)
 
@@ -1020,6 +1157,7 @@ def dispose():
                 old_session.bind.dispose()
             except Exception:
                 pass
+
 
 def session_commit(success=None, _session=None):
     s = _session if _session else session

@@ -200,6 +200,11 @@
                 {{ book_checkbox_row('is_archived', _('Archived?'), false)}}
               {%  endif %}
               {{ book_checkbox_row('read_status', _('Read?'), false)}}
+              {% if kobo_sync_hybrid %}
+                <th data-name="kobo_sync" data-field="kobo_sync" data-switchable="false"
+                  data-visible="{{ visiblility.get('kobo_sync', true) }}"
+                  data-formatter="bookCheckboxFormatter">{{ _('Kobo Sync') }}</th>
+              {% endif %}
               {% for c in cc %}
                 {% if c.datatype == "int" %}
                   <th data-field="custom_column_{{ c.id|string }}" id="custom_column_{{ c.id|string }}" data-visible="{{visiblility.get('custom_column_'+ c.id|string)}}" data-sortable="false" {% if current_user.role_edit() %} data-editable-type="number" data-editable-placeholder="1" data-editable-step="1" data-editable-url="{{ url_for('edit-book.edit_list_book', param='custom_column_'+ c.id|string)}}" data-edit="true" data-editable-title="{{_('Enter ') + c.name}}"{% endif %}>{{c.name}}</th>

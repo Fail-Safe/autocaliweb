@@ -19,6 +19,7 @@
 
 import io
 import mimetypes
+import glob
 import os
 import random
 import re
@@ -57,7 +58,7 @@ try:
     from .cw_advocate.exceptions import UnacceptableAddressException
 
     use_advocate = True
-except ImportError as e:
+except ImportError:
     use_advocate = False
     advocate = requests
     UnacceptableAddressException = MissingSchema = BaseException
@@ -81,7 +82,7 @@ from .epub_helper import (
 from .file_helper import get_temp_dir
 from .services.worker import WorkerThread
 from .string_helper import strip_whitespaces
-from .subproc_wrapper import process_wait
+from .subproc_wrapper import process_open, process_wait
 from .tasks.convert import TaskConvert
 from .tasks.mail import TaskEmail
 from .tasks.metadata_backup import TaskBackupMetadata
@@ -1274,7 +1275,7 @@ def save_cover_from_url(url, book_path):
     except MissingDelegateError as ex:
         log.info("File Format Error %s", ex)
         return False, _("Cover Format Error")
-    except UnacceptableAddressException as e:
+    except UnacceptableAddressException:
         log.error("Localhost or local network was accessed for cover upload")
         return False, _(
             "You are not allowed to access localhost or the local network for cover uploads"
@@ -1394,7 +1395,16 @@ def do_download_file(book, book_format, client, data, headers):
         else:
             abort(404)
     else:
-        filename = os.path.join(config.get_book_path(), book.path)
+        # If upstream code generated a temp export/conversion and attached the temp dir to the
+        # data object, serve from there instead of the library directory.
+        forced_dir = getattr(data, "_acw_temp_dir", None)
+        skip_embed = bool(getattr(data, "_acw_skip_embed", False))
+        if forced_dir:
+            filename = forced_dir
+            download_name = book_name
+            metadata_embedded = bool(getattr(data, "_acw_metadata_embedded", False))
+        else:
+            filename = os.path.join(config.get_book_path(), book.path)
         if not os.path.isfile(os.path.join(filename, book_name + "." + book_format)):
             # ToDo: improve error handling
             log.error(
@@ -1411,6 +1421,7 @@ def do_download_file(book, book_format, client, data, headers):
             book_format == "kepub"
             and config.config_kepubifypath
             and config.config_embed_metadata
+            and not skip_embed
         ):
             filename, download_name = do_kepubify_metadata_replace(
                 book, os.path.join(filename, book_name + "." + book_format)
@@ -1423,25 +1434,144 @@ def do_download_file(book, book_format, client, data, headers):
         ):
             filename, download_name = do_calibre_export(book.id, book_format)
             metadata_embedded = True
-
-            if filename and download_name:
-                uuid_file = os.path.join(filename, download_name + "." + book_format)
-                expected_file = os.path.join(filename, book_name + "." + book_format)
-
-                if os.path.exists(uuid_file) and uuid_file != expected_file:
-                    try:
-                        if os.path.exists(expected_file):
-                            os.remove(expected_file)
-
-                        os.rename(uuid_file, expected_file)
-                        download_name = book_name
-                        log.info(
-                            f"Renamed exported file to match expected name: {book_name}.{book_format}"
-                        )
-                    except Exception as e:
-                        log.error(f"Failed to rename exported file: {e}")
         else:
             download_name = book_name
+
+    # Kobo wrong-download hardening: if we're about to serve a temp KEPUB, verify it belongs to
+    # this book (by embedded identifiers). If it doesn't (or is unverifiable), regenerate a
+    # fresh KEPUB from the book's EPUB via kepubify.
+    if client == "kobo" and book_format == "kepub":
+        try:
+            real_filename_dir = os.path.realpath(filename) if filename else ""
+            tmpdir = get_temp_dir()
+            is_temp = False
+            if isinstance(real_filename_dir, str) and isinstance(tmpdir, str):
+                is_temp = real_filename_dir.startswith(tmpdir + os.sep) or (
+                    "calibre_web" in real_filename_dir
+                )
+
+            # Only do the expensive verification if we're serving from temp.
+            if is_temp and download_name:
+                target_path = os.path.join(
+                    real_filename_dir, download_name + "." + book_format
+                )
+
+                def _extract_acw_ids_from_epub(epub_path):
+                    try:
+                        tree, __ = get_content_opf(epub_path)
+                        opf_scheme_attr = "{http://www.idpf.org/2007/opf}scheme"
+                        found_uuid = None
+                        found_calibre_id = None
+                        for el in tree.xpath('//*[local-name()="identifier"]'):
+                            text = (el.text or "").strip()
+                            if not text:
+                                continue
+                            el_id = (el.get("id") or "").strip().lower()
+                            scheme = (
+                                el.get(opf_scheme_attr) or el.get("scheme") or ""
+                            ).strip().lower()
+                            if (el_id == "uuid_id") or (scheme == "uuid"):
+                                found_uuid = text
+                            if (el_id == "calibre_id") or (scheme == "calibre"):
+                                found_calibre_id = text
+                        return found_uuid, found_calibre_id
+                    except Exception:
+                        return None, None
+
+                embedded_uuid, embedded_calibre_id = _extract_acw_ids_from_epub(
+                    target_path
+                )
+                expected_uuid = getattr(book, "uuid", None)
+                expected_calibre_id = str(getattr(book, "id", ""))
+
+                missing_ids = (not embedded_uuid) and (not embedded_calibre_id)
+                mismatch = False
+                if embedded_uuid and expected_uuid and embedded_uuid != expected_uuid:
+                    mismatch = True
+                if (
+                    embedded_calibre_id
+                    and expected_calibre_id
+                    and embedded_calibre_id != expected_calibre_id
+                ):
+                    mismatch = True
+
+                if mismatch or (metadata_embedded and missing_ids):
+                    log.warning(
+                        "Kobo temp KEPUB mismatch/unverifiable; regenerating: book_id=%s expected_uuid=%s embedded_uuid=%s embedded_calibre_id=%s path=%s",
+                        getattr(book, "id", None),
+                        expected_uuid,
+                        embedded_uuid,
+                        embedded_calibre_id,
+                        target_path,
+                    )
+
+                    library_dir = os.path.join(config.get_book_path(), book.path)
+                    epub_path = os.path.join(library_dir, book_name + ".epub")
+
+                    if os.path.isfile(epub_path) and config.config_kepubifypath:
+                        temp_file_name = str(uuid4())
+                        temp_epub = os.path.join(tmpdir, temp_file_name + ".epub")
+                        shutil.copyfile(epub_path, temp_epub)
+
+                        quotes = [1, 3]
+                        command = [
+                            config.config_kepubifypath,
+                            temp_epub,
+                            "-o",
+                            tmpdir,
+                            "-i",
+                        ]
+                        try:
+                            p = process_open(command, quotes)
+                            while True:
+                                _ = p.stdout.readlines()
+                                if p.poll() is not None:
+                                    break
+                            if p.returncode == 0:
+                                converted_file = glob.glob(
+                                    glob.escape(os.path.splitext(temp_epub)[0])
+                                    + "*.kepub.epub"
+                                )
+                                if len(converted_file) == 1:
+                                    temp_kepub = os.path.join(
+                                        tmpdir, temp_file_name + ".kepub"
+                                    )
+                                    shutil.copyfile(converted_file[0], temp_kepub)
+                                    os.unlink(converted_file[0])
+
+                                    # Switch response to the regenerated file.
+                                    try:
+                                        if os.path.exists(target_path):
+                                            os.remove(target_path)
+                                    except Exception:
+                                        pass
+
+                                    filename = tmpdir
+                                    download_name = temp_file_name
+                                    metadata_embedded = False
+                        finally:
+                            try:
+                                if os.path.exists(temp_epub):
+                                    os.remove(temp_epub)
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+
+    try:
+        if client == "kobo":
+            log.debug(
+                "Kobo download resolved: calibre_book_id=%s uuid=%s format=%s embedded=%s src_dir=%s src_file=%s data_name=%s",
+                getattr(book, "id", None),
+                getattr(book, "uuid", None),
+                book_format,
+                metadata_embedded,
+                filename,
+                (download_name + "." + book_format) if download_name else None,
+                book_name,
+            )
+    except Exception:
+        pass
 
     response = make_response(
         send_from_directory(filename, download_name + "." + book_format)
@@ -1450,9 +1580,23 @@ def do_download_file(book, book_format, client, data, headers):
     for element in headers:
         response.headers[element[0]] = element[1]
 
+    # Kobo downloads should not be cached by intermediaries. A stale cached response could look
+    # like "wrong book downloaded" if a proxy returns content for a different book_id.
+    if client == "kobo":
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("Pragma", "no-cache")
+        response.headers.setdefault("Expires", "0")
+        try:
+            response.headers.setdefault("X-ACW-Book-Id", str(getattr(book, "id", "")))
+            response.headers.setdefault(
+                "X-ACW-Book-UUID", str(getattr(book, "uuid", ""))
+            )
+        except Exception:
+            pass
+
     log.info(
         "Downloading file: '%s' by %s - %s",
-        format(os.path.join(filename, book_name + "." + book_format)),
+        format(os.path.join(filename, (download_name or book_name) + "." + book_format)),
         current_user.name,
         request.headers.get("X-Forwarded-For", request.remote_addr),
     )
@@ -1662,6 +1806,198 @@ def get_download_link(book_id, book_format, client):
     if book:
         data1 = calibre_db.get_book_format(book.id, book_format.upper())
 
+        # Kobo hardening: for KEPUB downloads, prefer generating a fresh KEPUB from the EPUB
+        # for this book (when possible). This avoids serving a potentially corrupted/wrong
+        # on-disk .kepub created by an earlier bug.
+        if (
+            client == "kobo"
+            and book_format.lower() == "kepub"
+            and (not config.config_use_google_drive)
+            and config.config_kepubifypath
+        ):
+            try:
+                candidate_dir = os.path.join(config.get_book_path(), book.path)
+                epub_name = None
+                for d in getattr(book, "data", None) or []:
+                    if getattr(d, "format", None) in ("EPUB", "EPUB3"):
+                        epub_name = getattr(d, "name", None)
+                        if getattr(d, "format", None) == "EPUB":
+                            break
+                if epub_name:
+                    epub_path = os.path.join(candidate_dir, epub_name + ".epub")
+                    if os.path.isfile(epub_path):
+                        tmp_dir = get_temp_dir()
+                        temp_file_name = str(uuid4())
+                        temp_epub = os.path.join(tmp_dir, temp_file_name + ".epub")
+                        shutil.copyfile(epub_path, temp_epub)
+
+                        # Helper to synthesize a minimal "data-like" object for downstream code.
+                        def _make_data_like(name, size, tmp_dir_hint=None, embedded=False):
+                            dummy = type("DataLike", (), {})()
+                            dummy.name = name
+                            dummy.uncompressed_size = size
+                            if tmp_dir_hint:
+                                dummy._acw_temp_dir = tmp_dir_hint
+                                dummy._acw_skip_embed = True
+                                dummy._acw_metadata_embedded = bool(embedded)
+                            return dummy
+
+                        quotes = [1, 3]
+                        command = [
+                            config.config_kepubifypath,
+                            temp_epub,
+                            "-o",
+                            tmp_dir,
+                            "-i",
+                        ]
+                        try:
+                            p = process_open(command, quotes)
+                            while True:
+                                _ = p.stdout.readlines()
+                                if p.poll() is not None:
+                                    break
+                            if p.returncode == 0:
+                                converted_file = glob.glob(
+                                    glob.escape(os.path.splitext(temp_epub)[0])
+                                    + "*.kepub.epub"
+                                )
+                                if len(converted_file) == 1:
+                                    temp_kepub = os.path.join(
+                                        tmp_dir, temp_file_name + ".kepub"
+                                    )
+                                    shutil.copyfile(converted_file[0], temp_kepub)
+                                    os.unlink(converted_file[0])
+
+                                    if config.config_embed_metadata:
+                                        temp_kepub_dir, temp_kepub_name = (
+                                            do_kepubify_metadata_replace(book, temp_kepub)
+                                        )
+                                        data1 = _make_data_like(
+                                            temp_kepub_name,
+                                            os.path.getsize(
+                                                os.path.join(
+                                                    temp_kepub_dir,
+                                                    temp_kepub_name + ".kepub",
+                                                )
+                                            ),
+                                            tmp_dir_hint=temp_kepub_dir,
+                                            embedded=True,
+                                        )
+                                        try:
+                                            if os.path.exists(temp_kepub):
+                                                os.remove(temp_kepub)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        data1 = _make_data_like(
+                                            temp_file_name,
+                                            os.path.getsize(temp_kepub),
+                                            tmp_dir_hint=tmp_dir,
+                                            embedded=False,
+                                        )
+                        finally:
+                            try:
+                                if os.path.exists(temp_epub):
+                                    os.remove(temp_epub)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+        def _extract_acw_ids_from_epub(epub_path):
+            try:
+                tree, __ = get_content_opf(epub_path)
+                opf_scheme_attr = "{http://www.idpf.org/2007/opf}scheme"
+                found_uuid = None
+                found_calibre_id = None
+                for el in tree.xpath('//*[local-name()="identifier"]'):
+                    text = (el.text or "").strip()
+                    if not text:
+                        continue
+                    el_id = (el.get("id") or "").strip().lower()
+                    scheme = (
+                        el.get(opf_scheme_attr)
+                        or el.get("scheme")
+                        or ""
+                    ).strip().lower()
+                    if (el_id == "uuid_id") or (scheme == "uuid"):
+                        found_uuid = text
+                    if (el_id == "calibre_id") or (scheme == "calibre"):
+                        found_calibre_id = text
+                return found_uuid, found_calibre_id
+            except Exception:
+                return None, None
+
+        # Kobo wrong-download mitigation: if a persisted .kepub exists but contains embedded
+        # identifiers for a different book (from a previous buggy conversion), ignore it and
+        # regenerate from the EPUB when possible.
+        if (
+            data1
+            and client == "kobo"
+            and book_format.lower() == "kepub"
+            and (not config.config_use_google_drive)
+        ):
+            try:
+                candidate_dir = os.path.join(config.get_book_path(), book.path)
+                kepub_path = os.path.join(candidate_dir, data1.name + ".kepub")
+                if os.path.isfile(kepub_path):
+                    embedded_uuid, embedded_calibre_id = _extract_acw_ids_from_epub(
+                        kepub_path
+                    )
+                    expected_uuid = getattr(book, "uuid", None)
+                    expected_calibre_id = str(getattr(book, "id", ""))
+
+                    # If the file has no embedded IDs at all, we can't verify it matches this book.
+                    # In that case, prefer regenerating a fresh KEPUB from the book's EPUB when possible.
+                    missing_ids = (not embedded_uuid) and (not embedded_calibre_id)
+
+                    # Only enforce mismatch checks when the file actually has embedded IDs.
+                    mismatch = False
+                    if embedded_uuid and expected_uuid and embedded_uuid != expected_uuid:
+                        mismatch = True
+                    if embedded_calibre_id and expected_calibre_id and embedded_calibre_id != expected_calibre_id:
+                        mismatch = True
+
+                    # If an EPUB exists we can regenerate a correct KEPUB.
+                    base_name = None
+                    try:
+                        for d in getattr(book, "data", None) or []:
+                            if getattr(d, "format", None) == "EPUB":
+                                base_name = getattr(d, "name", None)
+                                break
+                        if (
+                            not base_name
+                            and getattr(book, "data", None)
+                            and len(book.data) > 0
+                        ):
+                            base_name = getattr(book.data[0], "name", None)
+                    except Exception:
+                        base_name = None
+
+                    epub_path = (
+                        os.path.join(candidate_dir, base_name + ".epub")
+                        if base_name
+                        else None
+                    )
+                    can_regen = (
+                        epub_path
+                        and os.path.isfile(epub_path)
+                        and config.config_kepubifypath
+                    )
+
+                    if can_regen and (mismatch or missing_ids):
+                        log.warning(
+                            "Ignoring on-disk KEPUB (unverifiable/mismatched IDs): book_id=%s expected_uuid=%s embedded_uuid=%s embedded_calibre_id=%s path=%s",
+                            getattr(book, "id", None),
+                            expected_uuid,
+                            embedded_uuid,
+                            embedded_calibre_id,
+                            kepub_path,
+                        )
+                        data1 = None
+            except Exception:
+                pass
+
         # Kobo-specific compatibility: generate and/or serve KEPUBs for Kobo downloads even when
         # the Calibre DB (metadata.db) is mounted read-only and cannot be updated with a
         # corresponding `data` row.
@@ -1720,68 +2056,77 @@ def get_download_link(book_id, book_format, client):
                         temp_epub = os.path.join(tmp_dir, temp_file_name + ".epub")
 
                         # Copy the source EPUB into temp (avoid writing into the library dir).
-                        copyfile(epub_path, temp_epub)
+                        shutil.copyfile(epub_path, temp_epub)
 
-                        # Ensure we have metadata replacement (embeds current metadata into the generated KEPUB).
-                        if config.config_embed_metadata:
-                            try:
-                                temp_kepub_dir, temp_kepub_name = (
-                                    do_kepubify_metadata_replace(book, temp_epub)
+                        # Generate a real KEPUB via kepubify.
+                        quotes = [1, 3]
+                        command = [
+                            config.config_kepubifypath,
+                            temp_epub,
+                            "-o",
+                            tmp_dir,
+                            "-i",
+                        ]
+                        try:
+                            p = process_open(command, quotes)
+                            while True:
+                                _ = p.stdout.readlines()
+                                if p.poll() is not None:
+                                    break
+                            if p.returncode == 0:
+                                converted_file = glob.glob(
+                                    glob.escape(os.path.splitext(temp_epub)[0])
+                                    + "*.kepub.epub"
                                 )
-                                data1 = _make_data_like(
-                                    temp_kepub_name,
-                                    os.path.getsize(
-                                        os.path.join(
-                                            temp_kepub_dir, temp_kepub_name + ".kepub"
-                                        )
-                                    ),
-                                )
-                            except Exception as e:
-                                log.error(
-                                    "Kobo KEPUB on-demand generation failed (metadata replace): %s",
-                                    e,
-                                )
-                                data1 = None
-                        else:
-                            # Raw kepubify without embedding metadata.
-                            quotes = [1, 3]
-                            command = [
-                                config.config_kepubifypath,
-                                temp_epub,
-                                "-o",
-                                tmp_dir,
-                                "-i",
-                            ]
-                            try:
-                                p = process_open(command, quotes)
-                                while True:
-                                    _ = p.stdout.readlines()
-                                    if p.poll() is not None:
-                                        break
-                                if p.returncode == 0:
-                                    converted_file = glob.glob(
-                                        glob.escape(os.path.splitext(temp_epub)[0])
-                                        + "*.kepub.epub"
+                                if len(converted_file) == 1:
+                                    # Normalize to a .kepub filename for the rest of the download pipeline.
+                                    temp_kepub = os.path.join(
+                                        tmp_dir, temp_file_name + ".kepub"
                                     )
-                                    if len(converted_file) == 1:
-                                        # Normalize to a .kepub filename for the rest of the download pipeline.
-                                        temp_kepub = os.path.join(
-                                            tmp_dir, temp_file_name + ".kepub"
+                                    shutil.copyfile(converted_file[0], temp_kepub)
+                                    os.unlink(converted_file[0])
+
+                                    if config.config_embed_metadata:
+                                        # Embed current metadata into the generated KEPUB.
+                                        temp_kepub_dir, temp_kepub_name = (
+                                            do_kepubify_metadata_replace(book, temp_kepub)
                                         )
-                                        copyfile(converted_file[0], temp_kepub)
-                                        os.unlink(converted_file[0])
+                                        data1 = _make_data_like(
+                                            temp_kepub_name,
+                                            os.path.getsize(
+                                                os.path.join(
+                                                    temp_kepub_dir,
+                                                    temp_kepub_name + ".kepub",
+                                                )
+                                            ),
+                                        )
+                                        # Best-effort cleanup of intermediate files.
+                                        try:
+                                            if os.path.exists(temp_kepub):
+                                                os.remove(temp_kepub)
+                                        except Exception:
+                                            pass
+                                    else:
                                         data1 = _make_data_like(
                                             temp_file_name, os.path.getsize(temp_kepub)
                                         )
                                 else:
-                                    log.error(
-                                        "Kobo KEPUB on-demand kepubify failed: rc=%s",
-                                        p.returncode,
-                                    )
                                     data1 = None
-                            except Exception as e:
-                                log.error("Kobo KEPUB on-demand kepubify failed: %s", e)
+                            else:
+                                log.error(
+                                    "Kobo KEPUB on-demand kepubify failed: rc=%s",
+                                    p.returncode,
+                                )
                                 data1 = None
+                        except Exception as e:
+                            log.error("Kobo KEPUB on-demand kepubify failed: %s", e)
+                            data1 = None
+                        finally:
+                            try:
+                                if os.path.exists(temp_epub):
+                                    os.remove(temp_epub)
+                            except Exception:
+                                pass
             except Exception:
                 data1 = None
 
