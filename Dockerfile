@@ -10,13 +10,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.source="https://github.com/gelbphoenix/autocaliweb" \
-      org.opencontainers.image.licences="GPL-3.0" \
-      org.opencontainers.image.authors="gelbphoenix" \
-      org.opencontainers.image.title="Autocaliweb" \
-      org.opencontainers.image.description="Web managing platform for eBooks, eComics and PDFs" \
-      de.gelbphoenix.autocaliweb.buildid="${BUILD_ID}"
+    org.opencontainers.image.version="${VERSION}" \
+    org.opencontainers.image.source="https://github.com/gelbphoenix/autocaliweb" \
+    org.opencontainers.image.licences="GPL-3.0" \
+    org.opencontainers.image.authors="gelbphoenix" \
+    org.opencontainers.image.title="Autocaliweb" \
+    org.opencontainers.image.description="Web managing platform for eBooks, eComics and PDFs" \
+    de.gelbphoenix.autocaliweb.buildid="${BUILD_ID}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -37,18 +37,18 @@ RUN useradd -u 911 -U -d /config -s /bin/false abc && \
 # Install dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      build-essential libldap2-dev libsasl2-dev \
-      curl python3-dev python3-pip \
-      imagemagick ghostscript libldap-2.5-0 \
-      libmagic1 libsasl2-2 libxi6 \
-      libxslt1.1 python3-venv libxtst6 \
-      libxrandr2 libxkbfile1 libxcomposite1 \
-      libopengl0 libnss3 libxkbcommon0 \
-      libegl1 libxdamage1 libgl1 \
-      libglx-mesa0 xz-utils sqlite3 \
-      xdg-utils tzdata inotify-tools \
-      netcat-openbsd binutils zip \
-      fonts-dejavu-core && \
+    build-essential libldap2-dev libsasl2-dev \
+    curl python3-dev python3-pip \
+    imagemagick ghostscript libldap-2.5-0 \
+    libmagic1 libsasl2-2 libxi6 \
+    libxslt1.1 python3-venv libxtst6 \
+    libxrandr2 libxkbfile1 libxcomposite1 \
+    libopengl0 libnss3 libxkbcommon0 \
+    libegl1 libxdamage1 libgl1 \
+    libglx-mesa0 xz-utils sqlite3 \
+    xdg-utils tzdata inotify-tools \
+    netcat-openbsd binutils zip \
+    fonts-dejavu-core && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /root/.cache /tmp/* /var/tmp/*
 
@@ -63,8 +63,8 @@ RUN cd /app/autocaliweb && \
     pip install -U pip wheel && \
     pip install --find-links https://wheel-index.linuxserver.io/ubuntu/ \
     -r /app/autocaliweb/requirements.txt \
-    -r /app/autocaliweb/optional-requirements.txt 
-    
+    -r /app/autocaliweb/optional-requirements.txt
+
 COPY . /app/autocaliweb/
 
 RUN cd /app/autocaliweb/koreader/plugins && \
@@ -75,7 +75,7 @@ RUN cd /app/autocaliweb/koreader/plugins && \
     find acwsync.koplugin -type f -name "*.lua" -o -name "*.json" | sort >> acwsync.koplugin/${PLUGIN_DIGEST}.digest && \
     zip -r koplugin.zip acwsync.koplugin/ && \
     cp /app/autocaliweb/koreader/plugins/koplugin.zip /app/autocaliweb/cps/static
-    
+
 RUN cp -r /app/autocaliweb/root/* / && \
     rm -R /app/autocaliweb/root/ && \
     /app/autocaliweb/scripts/setup-acw.sh && \
@@ -95,20 +95,21 @@ RUN export KEPUBIFY_RELEASE=$(curl -s https://api.github.com/repos/pgaskin/kepub
     echo "$KEPUBIFY_RELEASE" >| /app/KEPUBIFY_RELEASE
 
 # Install Calibre binaries
-RUN mkdir -p /app/calibre && \
+RUN mkdir -p /opt/calibre && \
     CALIBRE_RELEASE=$(curl -s https://api.github.com/repos/kovidgoyal/calibre/releases/latest | awk -F'"' '/tag_name/{print $4;exit}') && \
     CALIBRE_VERSION=${CALIBRE_RELEASE#v} && \
     curl --fail -o /tmp/calibre.txz -L https://download.calibre-ebook.com/${CALIBRE_VERSION}/calibre-${CALIBRE_VERSION}-$(uname -m | sed 's/x86_64/x86_64/;s/aarch64/arm64/').txz && \
-    tar xf /tmp/calibre.txz -C /app/calibre && \
+    tar xf /tmp/calibre.txz -C /opt/calibre && \
     rm /tmp/calibre.txz && \
-    /app/calibre/calibre_postinstall && \
     echo "$CALIBRE_RELEASE" >| /app/CALIBRE_RELEASE
+
+ENV PATH="/opt/calibre:${PATH}"
 
 # Clean up
 RUN apt-get purge -y \
     build-essential libldap2-dev \
     libsasl2-dev python3-dev && \
-    apt-get autoremove -y 
+    apt-get autoremove -y
 
 COPY --from=ghcr.io/linuxserver/unrar:latest /usr/bin/unrar-ubuntu /usr/bin/unrar
 
@@ -120,6 +121,6 @@ VOLUME /calibre-library
 
 # Healthcheck
 HEALTHCHECK --interval=60s --timeout=10s --start-period=5s --retries=2 \
-  CMD curl --fail -m 5 http://localhost:8083/health || exit 1
+    CMD curl --fail -m 5 http://localhost:8083/health || exit 1
 
 CMD ["/init"]
