@@ -33,7 +33,7 @@ from flask import Blueprint, request, flash, redirect, url_for, abort, Response,
 from flask_babel import gettext as _
 from flask_babel import lazy_gettext as N_
 from flask_babel import get_locale
-from .cw_login import current_user, login_required
+from .cw_login import current_user
 from sqlalchemy.exc import OperationalError, IntegrityError, InterfaceError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.sql.expression import func
@@ -45,6 +45,7 @@ from .services.worker import WorkerThread
 from .tasks.upload import TaskUpload
 from .render_template import render_title_template
 from .kobo_sync_status import change_archived_books
+from .shelf import ensure_kobo_opt_in_shelf, get_user_kobo_collections_mode
 from .redirect import get_redirect_location
 from .file_helper import validate_mime_type
 from .usermanagement import user_login_required, login_required_if_no_ano
@@ -79,13 +80,13 @@ def generate_cover(book):
     if not current_user.role_upload():
         flash(_("User has no rights to generate cover"), category="error")
         return False
-    
+
     try:
         if not book.title or not book.authors or not book.authors[0].name:
             log.error("Cannot generate cover: Book title or author missing for book id: %s", book.id)
             flash(_("Cannot generate cover: Book title or author missing"), category="error")
             return False
-        
+
         calibre_db.create_functions(config)
         generator = CoverGenerator()
         img_bytes = generator.generate(book.title, book.authors[0].name)
@@ -219,7 +220,7 @@ def generate_book_cover(book_id):
         flash(_("Error while generating cover: Book not found"), category="error")
         log.error("Error while generating cover: Book not found for book id: %s", book_id)
         return jsonify({"success": False, "error": "Book not found"})
-    
+
     try:
         if generate_cover(book):
             flash(_("Cover successfully generated"), category="success")
@@ -277,7 +278,8 @@ def table_get_custom_enum(c_id):
 @edit_required
 def edit_list_book(param):
     vals = request.form.to_dict()
-    return edit_book_param(param, vals)
+    normalized_param = (param or "").strip().strip("\"'")
+    return edit_book_param(normalized_param, vals)
 
 @editbook.route("/ajax/editselectedbooks", methods=['POST'])
 @login_required_if_no_ano
@@ -337,7 +339,7 @@ def edit_selected_books():
 #
 # param: the property of the book to be changed
 # vals - JSON Object:
-#   { 
+#   {
 #       'pk': "the book id",
 #       'value': "changes value of param to what's passed here"
 #       'checkA': "Optional. Used to check if autosort author is enabled. Assumed as true if not passed"
@@ -425,6 +427,48 @@ def edit_book_param(param, vals):
             ret = helper.edit_book_read_status(book.id, vals['value'] == "True")
             if ret:
                 return ret, 400
+        elif param == 'kobo_sync':
+            # Hybrid mode: allow toggling membership in the local-only Kobo opt-in shelf.
+            if not getattr(config, 'config_kobo_sync', False):
+                return _("Kobo sync is not enabled"), 400
+            if get_user_kobo_collections_mode(current_user) != 'hybrid':
+                return _("Kobo Sync can only be toggled in hybrid mode"), 400
+
+            desired = vals.get('value') == "True"
+            shelf = ensure_kobo_opt_in_shelf(int(current_user.id))
+            if not shelf or getattr(shelf, 'id', None) is None:
+                return _("Unable to access Kobo Sync shelf"), 500
+
+            link_q = ub.session.query(ub.BookShelf).filter(
+                ub.BookShelf.book_id == book.id,
+                ub.BookShelf.shelf == shelf.id,
+            )
+            existing = link_q.first()
+            if desired:
+                if not existing:
+                    link = ub.BookShelf()
+                    link.book_id = book.id
+                    # Prefer relationship assignment so before_flush can update Shelf.last_modified safely.
+                    link.ub_shelf = shelf
+                    ub.session.add(link)
+                    ub.session_commit()
+            else:
+                if existing:
+                    # Ensure relationship is present for before_flush hook.
+                    try:
+                        __ = existing.ub_shelf
+                    except Exception:
+                        pass
+                    link_q.delete(synchronize_session=False)
+                    ub.session_commit()
+
+            # Force Kobo sync to re-evaluate this book on next sync.
+            try:
+                kobo_sync_status.remove_synced_book(book.id, reason='kobo opt-in shelf changed')
+            except Exception:
+                pass
+
+            return ""
         elif param.startswith("custom_column_"):
             new_val = dict()
             new_val[param] = vals['value']
@@ -1174,7 +1218,7 @@ def render_edit_book(book_id):
     hardcover_blacklist = ub.session.query(ub.HardcoverBookBlacklist).filter(
         ub.HardcoverBookBlacklist.book_id == book_id
     ).first()
-    
+
     return render_title_template('book_edit.html', book=book, authors=author_names, cc=cc,
                                  title=_("edit metadata"), page="editbook",
                                  conversion_formats=allowed_conversion_formats,
@@ -1417,7 +1461,7 @@ def edit_hardcover_blacklist(book_id, to_save):
     changed = False
     new_blacklist_annotations = 'blacklist_annotations' in to_save
     new_blacklist_progress = 'blacklist_reading_progress' in to_save
-    
+
     # Only create/update record if at least one blacklist is active
     if not new_blacklist_annotations and not new_blacklist_progress:
         # Check if record exists and delete it
@@ -1428,26 +1472,26 @@ def edit_hardcover_blacklist(book_id, to_save):
             ub.session.delete(blacklist)
             changed = True
         return changed
-    
+
     # Get or create blacklist record
     blacklist = ub.session.query(ub.HardcoverBookBlacklist).filter(
         ub.HardcoverBookBlacklist.book_id == book_id
     ).first()
-    
+
     if blacklist is None:
         blacklist = ub.HardcoverBookBlacklist(book_id=book_id)
         ub.session.add(blacklist)
         changed = True
-    
+
     # Update settings
     if blacklist.blacklist_annotations != new_blacklist_annotations:
         blacklist.blacklist_annotations = new_blacklist_annotations
         changed = True
-    
+
     if blacklist.blacklist_reading_progress != new_blacklist_progress:
         blacklist.blacklist_reading_progress = new_blacklist_progress
         changed = True
-    
+
     return changed
 
 

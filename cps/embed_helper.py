@@ -163,6 +163,10 @@ def do_calibre_export(book_id, book_format):
         tmp_dir = get_temp_dir()
         calibredb_binarypath = get_calibre_binarypath("calibredb")
         temp_file_name = str(uuid4())
+        # Export into a unique directory to avoid mixing files between parallel exports.
+        # This prevents accidentally picking up an unrelated file from a shared temp dir.
+        export_root = os.path.join(tmp_dir, f"calibre-export-{uuid4()}")
+        os.makedirs(export_root, exist_ok=True)
         my_env = os.environ.copy()
 
         # If the library DB is mounted read-only, Calibre CLI may still attempt internal writes.
@@ -177,7 +181,7 @@ def do_calibre_export(book_id, book_format):
             "--with-library",
             library_path,
             "--to-dir",
-            tmp_dir,
+            export_root,
             "--formats",
             book_format,
             "--template",
@@ -189,7 +193,7 @@ def do_calibre_export(book_id, book_format):
         if err:
             log.error("Metadata embedder encountered an error: %s", err)
 
-        export_dir = os.path.join(tmp_dir, temp_file_name)
+        export_dir = os.path.join(export_root, temp_file_name)
         if os.path.isdir(export_dir):
             # Look for the book file with the specified format
             for filename in os.listdir(export_dir):
@@ -202,15 +206,16 @@ def do_calibre_export(book_id, book_format):
                 f"No {book_format} file found in export directory: {export_dir}"
             )
         else:
-            # No subdirectory - look for files directly in tmp_dir
-            for filename in os.listdir(tmp_dir):
+            # Some Calibre versions/configs may export directly into the root.
+            # Only scan within our unique export_root (never the global temp dir).
+            for filename in os.listdir(export_root):
                 if filename.lower().endswith("." + book_format.lower()):
                     actual_filename = os.path.splitext(filename)[0]
-                    return tmp_dir, actual_filename
+                    return export_root, actual_filename
 
-            log.warning(f"No {book_format} file found in {tmp_dir}")
+            log.warning(f"No {book_format} file found in export root: {export_root}")
 
-        return tmp_dir, temp_file_name
+        return None, None
     except OSError as ex:
         # ToDo real error handling
         log.error_or_exception(ex)
@@ -222,7 +227,7 @@ def get_calibre_binarypath(binary):
     if binariesdir:
         try:
             return os.path.join(binariesdir, SUPPORTED_CALIBRE_BINARIES[binary])
-        except KeyError as ex:
+        except KeyError:
             log.error(
                 "Binary not supported by Autocaliweb: %s",
                 SUPPORTED_CALIBRE_BINARIES[binary],

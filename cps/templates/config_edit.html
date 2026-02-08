@@ -6,77 +6,75 @@
       src="{{ url_for('static', filename='css/libs/images/loading-icon.gif') }}"
     />
   </div>
-</div>
-{% endblock %} {% block body %}
-<div class="discover">
-  <h2>{{title}}</h2>
-  <form role="form" method="POST" autocomplete="off">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-    <div class="panel-group col-md-11 col-lg-8">
-      <div class="panel panel-default">
-        <div class="panel-heading">
-          <h4 class="panel-title">
-            <a
-              class="accordion-toggle"
-              data-toggle="collapse"
-              href="#collapseone"
-            >
-              <span class="glyphicon glyphicon-plus"></span>
-              {{_('Server Configuration')}}
-            </a>
-          </h4>
-        </div>
-        <div id="collapseone" class="panel-collapse collapse">
-          <div class="panel-body">
-            <div class="form-group">
-              <label for="config_port">{{_('Server Port')}}</label>
-              <input
-                type="number"
-                min="1"
-                max="65535"
-                class="form-control"
-                name="config_port"
-                id="config_port"
-                value="{% if config.config_port != None %}{{ config.config_port }}{% endif %}"
-                autocomplete="off"
-                required
-              />
-            </div>
-            <div class="form-group input-group">
-              <label for="config_certfile"
-                >{{_('SSL certfile location (leave it empty for non-SSL
-                Servers)')}}</label
-              >
-              <input
-                type="text"
-                class="form-control"
-                id="config_certfile"
-                name="config_certfile"
-                value="{% if config.config_certfile != None %}{{ config.config_certfile }}{% endif %}"
-                autocomplete="off"
-              />
-              <span class="input-group-btn">
-                <button
-                  type="button"
-                  data-toggle="modal"
-                  data-link="config_certfile"
-                  data-target="#fileModal"
-                  id="certfile_path"
-                  class="btn btn-default"
+              <div data-related="kobo-proxy-settings">
+                <div class="form-group" style="margin-left: 20px">
+                  <input
+                    type="checkbox"
+                    id="config_kobo_disable_store_sync_merge"
+                    name="config_kobo_disable_store_sync_merge"
+                    {%
+                    if
+                    config.config_kobo_disable_store_sync_merge
+                    %}checked{%
+                    endif
+                    %}
+                  />
+                  <label for="config_kobo_disable_store_sync_merge"
+                    >{{_('Do not merge Kobo Store sync data into local sync (privacy/offline)')}}</label
+                  >
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-left: 10px">
+                <label for="config_kobo_sync_collections_mode"
+                  >{{_('Kobo Collections (Autocaliweb Shelves) Sync')}}</label
                 >
-                  <span class="glyphicon glyphicon-folder-open"></span>
-                </button>
-              </span>
-            </div>
-            <div class="form-group input-group">
-              <label for="config_keyfile"
-                >{{_('SSL Keyfile location (leave it empty for non-SSL
-                Servers)')}}</label
-              >
-              <input
-                type="text"
-                class="form-control"
-                id="config_keyfile"
+                <select
+                  class="form-control"
+                  id="config_kobo_sync_collections_mode"
+                  name="config_kobo_sync_collections_mode"
+                  data-control="kobo-collections-mode"
+                >
+                  {% set _kobo_collections_mode = (config.config_kobo_sync_collections_mode or 'selected')|trim|lower %}
+                  <option value="all" {% if _kobo_collections_mode == 'all' %}selected{% endif %}>{{_('Sync all shelves')}}</option>
+                  <option value="selected" {% if _kobo_collections_mode == 'selected' %}selected{% endif %}>{{_('Sync selected shelves')}}</option>
+                  <option value="hybrid" {% if _kobo_collections_mode == 'hybrid' %}selected{% endif %}>{{_('Hybrid sync')}}</option>
+                </select>
+                <p class="help-block">
+                  {{_('Kobo Collections correspond to Autocaliweb Shelves.')}}
+                  {{_('Selected/Hybrid use only shelves marked for Kobo sync.')}}
+                  {{_('Hybrid also includes generated shelves, but only for books added to the local-only “Kobo Sync” shelf (this shelf is not created on the Kobo).')}}
+                </p>
+              </div>
+
+              <div class="form-group" style="margin-left: 10px" data-related="kobo-collections-mode-selected">
+                <input
+                  type="checkbox"
+                  id="config_kobo_sync_include_generated_shelves_in_selected"
+                  name="config_kobo_sync_include_generated_shelves_in_selected"
+                  {% if config.config_kobo_sync_include_generated_shelves_in_selected %}checked{% endif %}
+                />
+                <label for="config_kobo_sync_include_generated_shelves_in_selected"
+                  >{{_('Include generated shelves')}}</label
+                >
+                <p class="help-block">
+                  {{_('Adds generated shelves as Kobo Collections, but only for books that are in shelves marked for Kobo sync.')}}
+                </p>
+              </div>
+              <div class="form-group" style="margin-left: 20px" data-related="kobo-collections-mode-selected">
+                <input
+                  type="checkbox"
+                  id="config_kobo_sync_all_generated_shelves"
+                  name="config_kobo_sync_all_generated_shelves"
+                  {% if config.config_kobo_sync_all_generated_shelves %}checked{% endif %}
+                />
+                <label for="config_kobo_sync_all_generated_shelves"
+                  >{{_('Sync ALL generated shelves')}}</label
+                >
+                <p class="help-block">
+                  {{_('When enabled, sync generated shelves for ALL books in your library, not just books in Kobo-synced shelves.')}}
+                </p>
+              </div>
                 name="config_keyfile"
                 value="{% if config.config_keyfile != None %}{{ config.config_keyfile }}{% endif %}"
                 autocomplete="off"
@@ -425,6 +423,57 @@
                     >{{_('Do not merge Kobo Store sync data into local sync (privacy/offline)')}}</label
                   >
                 </div>
+              </div>
+
+              <div class="form-group" style="margin-left: 10px">
+                <label for="config_kobo_sync_collections_mode"
+                  >{{_('Kobo Collections (Autocaliweb Shelves) Sync')}}</label
+                >
+                <select
+                  class="form-control"
+                  id="config_kobo_sync_collections_mode"
+                  name="config_kobo_sync_collections_mode"
+                  data-control="kobo-collections-mode"
+                >
+                  {% set _kobo_collections_mode = (config.config_kobo_sync_collections_mode or 'selected')|trim|lower %}
+                  <option value="all" {% if _kobo_collections_mode == 'all' %}selected{% endif %}>{{_('Sync all shelves')}}</option>
+                  <option value="selected" {% if _kobo_collections_mode == 'selected' %}selected{% endif %}>{{_('Sync selected shelves')}}</option>
+                  <option value="hybrid" {% if _kobo_collections_mode == 'hybrid' %}selected{% endif %}>{{_('Hybrid sync')}}</option>
+                </select>
+                <p class="help-block">
+                  {{_('Kobo Collections correspond to Autocaliweb Shelves.')}}
+                  {{_('Selected/Hybrid use only shelves marked for Kobo sync.')}}
+                  {{_('Hybrid also includes generated shelves, but only for books added to the local-only “Kobo Sync” shelf (this shelf is not created on the Kobo).')}}
+                </p>
+              </div>
+
+              <div class="form-group" style="margin-left: 10px" data-related="kobo-collections-mode-selected">
+                <input
+                  type="checkbox"
+                  id="config_kobo_sync_include_generated_shelves_in_selected"
+                  name="config_kobo_sync_include_generated_shelves_in_selected"
+                  {% if config.config_kobo_sync_include_generated_shelves_in_selected %}checked{% endif %}
+                />
+                <label for="config_kobo_sync_include_generated_shelves_in_selected"
+                  >{{_('Enable generated shelf sync')}}</label
+                >
+                <p class="help-block">
+                  {{_('Sync generated shelves (Author, Series, etc.) as Kobo Collections. Use "Edit Shelf" on each generated shelf to enable/disable Kobo sync for individual shelves.')}}
+                </p>
+              </div>
+              <div class="form-group" style="margin-left: 20px" data-related="kobo-collections-mode-selected">
+                <input
+                  type="checkbox"
+                  id="config_kobo_sync_all_generated_shelves"
+                  name="config_kobo_sync_all_generated_shelves"
+                  {% if config.config_kobo_sync_all_generated_shelves %}checked{% endif %}
+                />
+                <label for="config_kobo_sync_all_generated_shelves"
+                  >{{_('Include all library books')}}</label
+                >
+                <p class="help-block">
+                  {{_('When enabled, generated shelves include ALL books in your library. When disabled, only books that are also in regular Kobo-synced shelves are included.')}}
+                </p>
               </div>
 
               <div class="form-group" style="margin-left: 10px">

@@ -226,18 +226,43 @@ class ConfigSQL(object):
 
         change = False
 
-        if self.config_binariesdir is None:
-            change = True
-            self.config_binariesdir = autodetect_calibre_binaries()
-            self.config_converterpath = autodetect_converter_binary(self.config_binariesdir)
+        # Auto-detect external binaries on first run, and also repair persisted settings if they
+        # point at missing/invalid paths (common when reusing an existing config volume).
+        if not self.config_binariesdir or not is_valid_calibre_binaries_dir(
+            self.config_binariesdir
+        ):
+            detected = autodetect_calibre_binaries()
+            if detected and detected != (self.config_binariesdir or ""):
+                change = True
+                self.config_binariesdir = detected
 
-        if self.config_kepubifypath is None:
-            change = True
-            self.config_kepubifypath = autodetect_kepubify_binary()
+        if not self.config_converterpath or not (
+            os.path.isfile(self.config_converterpath)
+            and os.access(self.config_converterpath, os.X_OK)
+        ):
+            detected = autodetect_converter_binary(self.config_binariesdir or "")
+            if detected and detected != (self.config_converterpath or ""):
+                change = True
+                self.config_converterpath = detected
 
-        if self.config_rarfile_location is None:
-            change = True
-            self.config_rarfile_location = autodetect_unrar_binary()
+        if not self.config_kepubifypath or not (
+            os.path.isfile(self.config_kepubifypath)
+            and os.access(self.config_kepubifypath, os.X_OK)
+        ):
+            detected = autodetect_kepubify_binary()
+            if detected and detected != (self.config_kepubifypath or ""):
+                change = True
+                self.config_kepubifypath = detected
+
+        if not self.config_rarfile_location or not (
+            os.path.isfile(self.config_rarfile_location)
+            and os.access(self.config_rarfile_location, os.X_OK)
+        ):
+            detected = autodetect_unrar_binary()
+            if detected and detected != (self.config_rarfile_location or ""):
+                change = True
+                self.config_rarfile_location = detected
+
         if change:
             self.save()
 
@@ -535,6 +560,16 @@ def autodetect_calibre_binaries():
                 log.debug("calibre version %s", version)
                 return element
     return ""
+
+
+def is_valid_calibre_binaries_dir(binaries_dir: str) -> bool:
+    if not binaries_dir:
+        return False
+    for binary in constants.SUPPORTED_CALIBRE_BINARIES.values():
+        full_path = os.path.join(binaries_dir, binary)
+        if not (os.path.isfile(full_path) and os.access(full_path, os.X_OK)):
+            return False
+    return True
 
 
 def autodetect_converter_binary(calibre_path):

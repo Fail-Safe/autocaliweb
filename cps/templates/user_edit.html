@@ -164,6 +164,15 @@
       <input type="number" class="form-control" name="kobo_sync_item_limit" id="kobo_sync_item_limit" value="{{ content.kobo_sync_item_limit if content.kobo_sync_item_limit else 100 }}" min="10" max="500">
       <p class="help-block">{{_('Number of books to sync per request. Lower values may help with timeout issues on slower devices.')}}</p>
     </div>
+
+    <div class="form-group">
+      <label for="kobo_remove_behavior">{{_('When I remove a book on my Kobo')}}</label>
+      <select name="kobo_remove_behavior" id="kobo_remove_behavior" class="form-control">
+        <option value="archive" {% if (content.kobo_remove_behavior or "archive") == "archive" %}selected{% endif %}>{{_('Archive it in Autocaliweb (hide from main library view)')}}</option>
+        <option value="unsync_shelf" {% if (content.kobo_remove_behavior or "archive") == "unsync_shelf" %}selected{% endif %}>{{_('Remove from Kobo Sync Shelf (keep visible in Autocaliweb)')}}</option>
+      </select>
+      <p class="help-block">{{_('Controls how Autocaliweb handles the Kobo "Remove this book" action.')}}</p>
+    </div>
     <div class="form-group">
       <input type="checkbox" name="kobo_sync_empty_collections" id="kobo_sync_empty_collections" {% if content.kobo_sync_empty_collections %}checked{% endif %}>
       <label for="kobo_sync_empty_collections">{{_('Sync empty collections')}}</label>

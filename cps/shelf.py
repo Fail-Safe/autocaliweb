@@ -43,7 +43,6 @@ from .usermanagement import login_required_if_no_ano, user_login_required
 log = logger.create()
 
 shelf = Blueprint("shelf", __name__)
-
 KOBO_OPT_IN_SHELF_NAME = "Kobo Sync"
 
 

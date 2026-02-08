@@ -242,6 +242,16 @@ This repository includes a modern ESLint v9 setup (flat config) for the browser 
 
 Configuration lives in `eslint.config.js`.
 
+### Python development (uv)
+
+This repo uses `pyproject.toml` + `uv.lock` for Python dependencies. For local development, a project-local virtual environment (`.venv/`) works well with VS Code/Pylance and is already ignored by git.
+
+- Create the venv: `uv venv`
+- Install deps from the lockfile: `uv sync`
+- Run commands inside the environment: `uv run pytest` (or `uv run python cps.py`)
+
+Note: `requirements.txt` / `optional-requirements.txt` are still used by the Docker image build and some install scripts.
+
 ### Reporting Bugs
 
 If you encounter bugs or issues, please report them in the [issues section](https://github.com/gelbphoenix/autocaliweb/issues) of the repository. Be sure to include detailed information about your setup and the problem encountered.

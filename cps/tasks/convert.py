@@ -188,6 +188,8 @@ class TaskConvert(CalibreTask):
                             "readonly" in str(e).lower()
                             or "read-only" in str(e).lower()
                         ):
+                            # Always rollback to reset the Session's failed transaction state.
+                            local_db.session.rollback()
                             log.warning(
                                 "Calibre DB appears read-only; skipping insert of new format row for book id %d (%s): %s",
                                 book_id,
@@ -237,6 +239,10 @@ class TaskConvert(CalibreTask):
 
             if check == 0:
                 cur_book = local_db.get_book(book_id)
+                # Cache attributes before any DB write attempt so we don't trigger lazy loads
+                # if the session enters a failed transaction state (e.g. read-only DB).
+                book_path = cur_book.path
+                book_title = cur_book.title
                 if os.path.isfile(file_path + format_new_ext):
                     new_format = (
                         local_db.session.query(db.Data)
@@ -282,6 +288,8 @@ class TaskConvert(CalibreTask):
                                 "readonly" in str(e).lower()
                                 or "read-only" in str(e).lower()
                             ):
+                                # Always rollback to reset the Session's failed transaction state.
+                                local_db.session.rollback()
                                 log.warning(
                                     "Calibre DB appears read-only; skipping insert of new format row for book id %d (%s): %s",
                                     book_id,
@@ -294,8 +302,8 @@ class TaskConvert(CalibreTask):
                                 local_db.session.close()
                                 self._handleError(error_message)
                                 return
-                    self.results["path"] = cur_book.path
-                    self.title = cur_book.title
+                    self.results["path"] = book_path
+                    self.title = book_title
                     self.results["title"] = self.title
                     if not config.config_use_google_drive:
                         self._handleSuccess()
@@ -315,15 +323,31 @@ class TaskConvert(CalibreTask):
         return
 
     def _convert_kepubify(self, file_path, format_old_ext, format_new_ext):
+        filename = file_path + format_old_ext
+        temp_file_path = os.path.dirname(file_path)
+
+        # Best-effort: if metadata embedding is enabled, export the book via calibredb into a
+        # temp location and run kepubify on that file. If export fails (e.g., calibredb path is
+        # misconfigured), fall back to converting the original EPUB instead of crashing.
         if config.config_embed_metadata and config.config_binariesdir:
             tmp_dir, temp_file_name = helper.do_calibre_export(
                 self.book_id, format_old_ext[1:]
             )
-            filename = os.path.join(tmp_dir, temp_file_name + format_old_ext)
-            temp_file_path = tmp_dir
-        else:
-            filename = file_path + format_old_ext
-            temp_file_path = os.path.dirname(file_path)
+            if tmp_dir and temp_file_name:
+                exported = os.path.join(tmp_dir, temp_file_name + format_old_ext)
+                if os.path.isfile(exported):
+                    filename = exported
+                    temp_file_path = tmp_dir
+                else:
+                    log.warning(
+                        "Calibre export did not produce expected file '%s'; falling back to source file",
+                        exported,
+                    )
+            else:
+                log.warning(
+                    "Calibre export failed for book id %s; falling back to source file",
+                    self.book_id,
+                )
         quotes = [1, 3]
         command = [config.config_kepubifypath, filename, "-o", temp_file_path, "-i"]
         try:
@@ -384,7 +408,13 @@ class TaskConvert(CalibreTask):
                     "--with-library",
                     library_path,
                 ]
-                p = process_open(opf_command, quotes, my_env, newlines=False)
+                try:
+                    p = process_open(opf_command, quotes, my_env, newlines=False)
+                except OSError:
+                    return 1, N_(
+                        "Calibre ebook-convert %(tool)s not found",
+                        tool=calibredb_binarypath,
+                    )
                 lines = list()
                 while p.poll() is None:
                     lines.append(p.stdout.readline())

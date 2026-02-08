@@ -28,7 +28,6 @@ from .cw_login import current_user
 from .generated_shelves import list_generated_shelves
 from .ub import User
 
-
 def _get_user_kobo_collections_mode(user=None):
     """Get the Kobo collections sync mode for a user.
 
@@ -65,7 +64,6 @@ def _get_user_kobo_collections_mode(user=None):
     if mode not in ("all", "selected", "hybrid"):
         mode = "selected"
     return mode
-
 
 # CWA specific imports
 import os
