@@ -288,15 +288,26 @@ def create_app():
     # Configure rate limiter
     # https://limits.readthedocs.io/en/stable/storage.html
     app.config.update(RATELIMIT_ENABLED=config.config_ratelimiter)
-    if config.config_limiter_uri != "" and not cli_param.memory_backend:
+
+    # Prefer explicit configuration from env (useful for containers), then config DB.
+    limiter_storage_uri = os.environ.get("ACW_RATELIMIT_STORAGE_URI") or os.environ.get(
+        "RATELIMIT_STORAGE_URI"
+    )
+    if limiter_storage_uri:
+        app.config.update(RATELIMIT_STORAGE_URI=limiter_storage_uri)
+    elif config.config_limiter_uri != "" and not cli_param.memory_backend:
         app.config.update(RATELIMIT_STORAGE_URI=config.config_limiter_uri)
         if config.config_limiter_options != "":
             app.config.update(RATELIMIT_STORAGE_OPTIONS=config.config_limiter_options)
+    else:
+        # Be explicit about the default (memory) backend to avoid the warning:
+        # "Using the in-memory storage ... as no storage was explicitly specified".
+        app.config.update(RATELIMIT_STORAGE_URI="memory://")
     try:
         limiter.init_app(app)
     except Exception as e:
         log.error('Wrong Flask Limiter configuration, falling back to default: {}'.format(e))
-        app.config.update(RATELIMIT_STORAGE_URI=None)
+        app.config.update(RATELIMIT_STORAGE_URI="memory://")
         limiter.init_app(app)
 
     # Register scheduled tasks
@@ -304,6 +315,13 @@ def create_app():
     register_scheduled_tasks(config.schedule_reconnect)
     register_startup_tasks()
 
+    # Optional: reconnect Calibre DB quickly when metadata.db changes.
+    # Enabled via env vars (see cps.calibre_db_watcher.start_calibre_db_watcher).
+    try:
+        from .calibre_db_watcher import start_calibre_db_watcher
+
+        start_calibre_db_watcher(app)
+    except Exception as e:
+        log.warning("Calibre DB watcher failed to start: %s", e)
+
     return app
-
-
