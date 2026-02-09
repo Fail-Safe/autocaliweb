@@ -16,6 +16,7 @@
 #  You should have received a copy of the GNU General Public License
 #  along with this program. If not, see <http://www.gnu.org/licenses/>.
 import itertools
+import warnings
 from typing import Dict, List, Optional
 from urllib.parse import quote, unquote
 
@@ -23,6 +24,18 @@ try:
     from fake_useragent.errors import FakeUserAgentError
 except (ImportError):
     FakeUserAgentError = BaseException
+
+# scholarly 1.7.x emits a SyntaxWarning on Python 3.13:
+#   SyntaxWarning: invalid escape sequence '\d'
+# from scholarly/_scholarly.py. This is harmless but noisy in logs.
+#
+# Note: for SyntaxWarnings raised during module compilation, the warning's
+# internal "module" field isn't reliably the import name, so filter by message.
+warnings.filterwarnings(
+    "ignore",
+    category=SyntaxWarning,
+    message=r"invalid escape sequence '\\d'",
+)
 try:
     from scholarly import scholarly
 except FakeUserAgentError:
